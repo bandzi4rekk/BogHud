@@ -7,20 +7,19 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import pl.boghud.Rows.*;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 
 /**
- * Ekran ustawień w stylu "TWOJE MODUŁY": ciemny panel z kartami modułów (tag, nazwa, opis, przełącznik).
- * Kliknięcie karty otwiera jej ustawienia z podglądem na żywo, strzałka "< WRÓĆ" wraca do listy.
+ * Menu moda na cały ekran w stylu "TWOJE MODUŁY": karty modułów (tag, nazwa, opis, przełącznik),
+ * strony przewijane kółkiem myszy, ustawienia modułu z podglądem na żywo oraz przycisk Edytora HUD.
  */
 public class HudConfigScreen extends Screen {
-    private static final int CARD_H = 58;
+    private static final int CARD_H = 54;
     private static final int GAP = 6;
     private static final int PREVIEW_H = 86;
     private static final int RED = 0xFFE05555;
@@ -28,19 +27,30 @@ public class HudConfigScreen extends Screen {
     private static final int BLUE = 0xFF5599E0;
     private static final int[] PRESETS = {0xFF4D6D, 0x5CE1E6, 0xB388FF, 0x66E08A, 0xFFB45C, 0xFFFFFF};
 
-    /** Moduły: 0 = Ogólne, 1..ELEMENTS = elementy HUD, potem Target HUD, Target Ring i Motyw GUI. */
-    private static final int M_TARGET = HudConfig.ELEMENTS + 1;
-    private static final int M_RING = HudConfig.ELEMENTS + 2;
-    private static final int M_GUI = HudConfig.ELEMENTS + 3;
-    private static final int MODULES = HudConfig.ELEMENTS + 4;
+    /** Moduły: 0 = Ogólne, 1..ELEMENTS = elementy HUD, potem wizualia, opcje Ekran i Motyw GUI. */
+    private static final int E = HudConfig.ELEMENTS;
+    private static final int M_TARGET = E + 1;
+    private static final int M_RING = E + 2;
+    private static final int M_JUMP = E + 3;
+    private static final int M_HAT = E + 4;
+    private static final int M_HIT = E + 5;
+    private static final int M_CROSS = E + 6;
+    private static final int M_RATIO = E + 7;
+    private static final int M_VIEW = E + 8;
+    private static final int M_NICKHP = E + 9;
+    private static final int M_GUI = E + 10;
+    private static final int MODULES = E + 11;
     private static final String[] TAGS = {"HUD", "NICK", "TEXT", "FPS", "PING", "XYZ", "ARMOR", "CPS", "KEYS",
-            "TARGET", "RING", "GUI"};
+            "TARGET", "RING", "JUMP", "HAT", "HIT", "CROSS", "RATIO", "VIEW", "HP", "GUI"};
     private static final String[] NAMES = {"Ogólne", "Nick", "Tekst", "FPS", "Ping", "Koordynaty", "Pancerz",
-            "Licznik CPS", "Klawisze", "Target HUD", "Target Ring", "Motyw GUI"};
-    private static final String[] DESCS = {"Pozycja HUD i reset", "Twój nick z piorunem", "Własny napis",
+            "Licznik CPS", "Klawisze", "Target HUD", "Target Ring", "Jump Circles", "China Hat",
+            "Hit Particles", "Ring Crosshair", "Proporcje", "View Model", "HP nad nickiem", "Motyw GUI"};
+    private static final String[] DESCS = {"Edytor HUD i reset", "Twój nick z piorunem", "Własny napis",
             "Klatki na sekundę", "Opóźnienie do serwera", "Pozycja X, Y, Z", "Ikony i wytrzymałość",
             "Kliknięcia LPM i PPM", "WASD, spacja i myszka", "Info o celu walki",
-            "Pierścień wokół celu", "Kolory i rozmiar okna"};
+            "Pierścień wokół celu", "Kółko przy skoku", "Kapelusz nad głową",
+            "Cząsteczki przy trafieniu", "Kółko wokół celownika", "Rozciągnięty ekran",
+            "Pozycja przedmiotów", "Zdrowie graczy", "Kolory i rozmiar okna"};
 
     private final Screen parent;
     private TextFieldWidget field;
@@ -50,10 +60,12 @@ public class HudConfigScreen extends Screen {
     private int rowLw;
 
     private int selected = -1; // -1 = lista modułów
+    private int page = 0;
     private Row activeRow;
     private int activeX, activeW;
 
-    private int px, py, pw, ph, cols, cardW;
+    // układ (liczony co klatkę)
+    private int cl = 16, ct, cw, gridY, cols, cardW, perPage, pages, ncol, colW;
 
     public HudConfigScreen(Screen parent) {
         super(Text.literal("Bog HUD"));
@@ -84,6 +96,10 @@ public class HudConfigScreen extends Screen {
         else rows.clear();
     }
 
+    private void openEditor() {
+        if (this.client != null) this.client.setScreen(new HudEditorScreen(this));
+    }
+
     private void openModule(int m) {
         selected = m;
         rows.clear();
@@ -93,17 +109,23 @@ public class HudConfigScreen extends Screen {
         else if (m == M_GUI) buildGui();
         else if (m == M_TARGET) buildTarget();
         else if (m == M_RING) buildRing();
+        else if (m == M_JUMP) buildJump();
+        else if (m == M_HAT) buildHat();
+        else if (m == M_HIT) buildHit();
+        else if (m == M_CROSS) buildCross();
+        else if (m == M_RATIO) buildRatio();
+        else if (m == M_VIEW) buildView();
+        else if (m == M_NICKHP) buildNickHp();
         else buildElement(m - 1);
     }
 
     private void buildGeneral() {
-        final int mw = Math.max(1, this.width);
-        final int mh = Math.max(1, this.height);
         rows.add(new ToggleRow("HUD włączony", () -> c().enabled, v -> c().enabled = v));
-        rows.add(new SliderRow("HUD X", 0, mw, () -> c().stackX, v -> c().stackX = v, 0));
-        rows.add(new SliderRow("HUD Y", 0, mh, () -> c().stackY, v -> c().stackY = v, 0));
-        rows.add(new TextRow("Elementy HUD układają się"));
-        rows.add(new TextRow("jeden pod drugim."));
+        rows.add(new ButtonRow("Edytor HUD", this::openEditor));
+        rows.add(new ButtonRow("Ułóż elementy pod sobą", () -> c().resetPositions()));
+        rows.add(new TextRow("Elementy HUD ustawiasz gdzie"));
+        rows.add(new TextRow("chcesz w Edytorze HUD:"));
+        rows.add(new TextRow("przeciągasz je myszką po ekranie."));
         rows.add(new ButtonRow("Reset wszystkiego", () -> {
             HudMod.CONFIG = new HudConfig();
             HudMod.CONFIG.fixup();
@@ -126,13 +148,12 @@ public class HudConfigScreen extends Screen {
         rows.add(new ToggleRow("Tło z piorunami", () -> el(ei).background, v -> el(ei).background = v));
         rows.add(new SliderRow("Krycie tła", 0, 255, () -> el(ei).backgroundAlpha, v -> el(ei).backgroundAlpha = v, 0));
         rows.add(new ToggleRow("Cień tekstu", () -> el(ei).shadow, v -> el(ei).shadow = v));
+        rows.add(new TextRow("Pozycję ustawiasz w Edytorze HUD."));
     }
 
     private void buildTarget() {
         rows.add(new ToggleRow("Włączony", () -> c().target.enabled, v -> c().target.enabled = v));
         rows.add(new SliderRow("Skala %", 50, 200, () -> c().target.scalePercent, v -> c().target.scalePercent = v, 0));
-        rows.add(new SliderRow("Offset X", -300, 300, () -> c().targetX, v -> c().targetX = v, 0));
-        rows.add(new SliderRow("Offset Y", -200, 200, () -> c().targetY, v -> c().targetY = v, 0));
         rows.add(new HeadingRow("Kolor tekstu", () -> c().target.textColor));
         addChannels(() -> c().target.textColor, v -> c().target.textColor = v);
         rows.add(new HeadingRow("Kolor akcentu", () -> c().target.accentColor));
@@ -140,6 +161,7 @@ public class HudConfigScreen extends Screen {
         rows.add(new ToggleRow("Tło z piorunami", () -> c().target.background, v -> c().target.background = v));
         rows.add(new SliderRow("Krycie tła", 0, 255, () -> c().target.backgroundAlpha, v -> c().target.backgroundAlpha = v, 0));
         rows.add(new ToggleRow("Cień tekstu", () -> c().target.shadow, v -> c().target.shadow = v));
+        rows.add(new TextRow("Pozycję ustawiasz w Edytorze HUD."));
     }
 
     private void buildRing() {
@@ -154,9 +176,96 @@ public class HudConfigScreen extends Screen {
         rows.add(new TextRow("albo którego ostatnio uderzyłeś."));
     }
 
+    private void buildJump() {
+        rows.add(new ToggleRow("Włączone", () -> c().jump.enabled, v -> c().jump.enabled = v));
+        rows.add(new SliderRow("Promień %", 50, 200, () -> c().jump.radiusPercent, v -> c().jump.radiusPercent = v, 0));
+        rows.add(new SliderRow("Czas (ms)", 300, 1500, () -> c().jump.durationMs, v -> c().jump.durationMs = v, 0));
+        rows.add(new SliderRow("Krycie", 20, 255, () -> c().jump.alpha, v -> c().jump.alpha = v, 0));
+        rows.add(new HeadingRow("Kolor kółka", () -> c().jump.color));
+        addChannels(() -> c().jump.color, v -> c().jump.color = v);
+        rows.add(new TextRow("Kółko rozchodzi się spod nóg,"));
+        rows.add(new TextRow("gdy podskoczysz."));
+    }
+
+    private void buildHat() {
+        rows.add(new ToggleRow("Włączony", () -> c().hat.enabled, v -> c().hat.enabled = v));
+        rows.add(new ToggleRow("Innym graczom", () -> c().hat.showOthers, v -> c().hat.showOthers = v));
+        rows.add(new SliderRow("Rozmiar %", 50, 200, () -> c().hat.sizePercent, v -> c().hat.sizePercent = v, 0));
+        rows.add(new SliderRow("Krycie", 20, 255, () -> c().hat.alpha, v -> c().hat.alpha = v, 0));
+        rows.add(new HeadingRow("Kolor kapelusza", () -> c().hat.color));
+        addChannels(() -> c().hat.color, v -> c().hat.color = v);
+        rows.add(new TextRow("Swój kapelusz widzisz w trzeciej"));
+        rows.add(new TextRow("osobie (F5)."));
+    }
+
+    private void buildHit() {
+        rows.add(new ToggleRow("Włączone", () -> c().hit.enabled, v -> c().hit.enabled = v));
+        rows.add(new HeadingRow("Rodzaj cząsteczek", null));
+        rows.add(new ChoiceRow(new int[]{0, 1, 2, 3}, new String[]{"Crit", "Magia", "Ogień", "Gwiazdy"},
+                () -> c().hit.type, v -> c().hit.type = v));
+        rows.add(new SliderRow("Ilość", 1, 40, () -> c().hit.count, v -> c().hit.count = v, 0));
+    }
+
+    private void buildCross() {
+        rows.add(new ToggleRow("Włączony", () -> c().cross.enabled, v -> c().cross.enabled = v));
+        rows.add(new SliderRow("Promień", 3, 30, () -> c().cross.radius, v -> c().cross.radius = v, 0));
+        rows.add(new SliderRow("Grubość", 1, 4, () -> c().cross.thickness, v -> c().cross.thickness = v, 0));
+        rows.add(new ToggleRow("Czerwony na celu", () -> c().cross.reactToTarget, v -> c().cross.reactToTarget = v));
+        rows.add(new HeadingRow("Kolor kółka", () -> c().cross.color));
+        addChannels(() -> c().cross.color, v -> c().cross.color = v);
+    }
+
+    private void buildRatio() {
+        rows.add(new ToggleRow("Włączone", () -> c().aspect.enabled, v -> c().aspect.enabled = v));
+        rows.add(new HeadingRow("Gotowe proporcje", null));
+        rows.add(new ChoiceRow(new int[]{133, 125, 160, 178, 233},
+                new String[]{"4:3", "5:4", "16:10", "16:9", "21:9"},
+                () -> c().aspect.ratioPercent, v -> c().aspect.ratioPercent = v));
+        rows.add(new SliderRow("Własne", 50, 300, () -> c().aspect.ratioPercent, v -> c().aspect.ratioPercent = v, 0));
+        rows.add(new TextRow("Wartość 178 to 16:9, 133 to 4:3."));
+        rows.add(new TextRow("Mniejsza liczba = bardziej"));
+        rows.add(new TextRow("rozciągnięty obraz."));
+    }
+
+    private void buildView() {
+        rows.add(new ToggleRow("Włączony", () -> c().viewModel.enabled, v -> c().viewModel.enabled = v));
+        rows.add(new HeadingRow("Główna ręka", null));
+        addHand(true);
+        rows.add(new HeadingRow("Druga ręka", null));
+        addHand(false);
+        rows.add(new ButtonRow("Reset ustawień rąk", () -> {
+            boolean en = c().viewModel.enabled;
+            c().viewModel = new HudConfig.ViewModel();
+            c().viewModel.enabled = en;
+            clearAndInit();
+        }));
+    }
+
+    private HudConfig.HandCfg hand(boolean main) {
+        return main ? c().viewModel.main : c().viewModel.off;
+    }
+
+    private void addHand(boolean main) {
+        rows.add(new SliderRow("X", -100, 100, () -> hand(main).x, v -> hand(main).x = v, 0));
+        rows.add(new SliderRow("Y", -100, 100, () -> hand(main).y, v -> hand(main).y = v, 0));
+        rows.add(new SliderRow("Z", -100, 100, () -> hand(main).z, v -> hand(main).z = v, 0));
+        rows.add(new SliderRow("Obrót X", -180, 180, () -> hand(main).rotX, v -> hand(main).rotX = v, 0));
+        rows.add(new SliderRow("Obrót Y", -180, 180, () -> hand(main).rotY, v -> hand(main).rotY = v, 0));
+        rows.add(new SliderRow("Obrót Z", -180, 180, () -> hand(main).rotZ, v -> hand(main).rotZ = v, 0));
+        rows.add(new SliderRow("Skala %", 10, 200, () -> hand(main).scale, v -> hand(main).scale = v, 0));
+    }
+
+    private void buildNickHp() {
+        rows.add(new ToggleRow("Pokazuj HP", () -> c().nickHp.enabled, v -> c().nickHp.enabled = v));
+        rows.add(new SliderRow("Zasięg (bloki)", 8, 64, () -> c().nickHp.range, v -> c().nickHp.range = v, 0));
+        rows.add(new TextRow("HP gracza pojawia się nad jego"));
+        rows.add(new TextRow("nickiem. Kolor zależy od ilości"));
+        rows.add(new TextRow("zdrowia (zielony, żółty, czerwony)."));
+    }
+
     private void buildGui() {
         rows.add(new HeadingRow("Rozmiar GUI (%)", null));
-        rows.add(new ChoiceRow(new int[]{70, 85, 100, 125, 150}, () -> c().guiScale, v -> c().guiScale = v));
+        rows.add(new ChoiceRow(new int[]{70, 85, 100, 125, 150}, null, () -> c().guiScale, v -> c().guiScale = v));
         rows.add(new HeadingRow("Gotowe motywy", null));
         rows.add(new ThemeRow(i -> {
             c().guiAccent = ThemeRow.T[i][0];
@@ -189,6 +298,13 @@ public class HudConfigScreen extends Screen {
         if (m == 0) return c().enabled;
         if (m == M_TARGET) return c().target.enabled;
         if (m == M_RING) return c().ring.enabled;
+        if (m == M_JUMP) return c().jump.enabled;
+        if (m == M_HAT) return c().hat.enabled;
+        if (m == M_HIT) return c().hit.enabled;
+        if (m == M_CROSS) return c().cross.enabled;
+        if (m == M_RATIO) return c().aspect.enabled;
+        if (m == M_VIEW) return c().viewModel.enabled;
+        if (m == M_NICKHP) return c().nickHp.enabled;
         return el(m - 1).enabled;
     }
 
@@ -196,6 +312,13 @@ public class HudConfigScreen extends Screen {
         if (m == 0) c().enabled = !c().enabled;
         else if (m == M_TARGET) c().target.enabled = !c().target.enabled;
         else if (m == M_RING) c().ring.enabled = !c().ring.enabled;
+        else if (m == M_JUMP) c().jump.enabled = !c().jump.enabled;
+        else if (m == M_HAT) c().hat.enabled = !c().hat.enabled;
+        else if (m == M_HIT) c().hit.enabled = !c().hit.enabled;
+        else if (m == M_CROSS) c().cross.enabled = !c().cross.enabled;
+        else if (m == M_RATIO) c().aspect.enabled = !c().aspect.enabled;
+        else if (m == M_VIEW) c().viewModel.enabled = !c().viewModel.enabled;
+        else if (m == M_NICKHP) c().nickHp.enabled = !c().nickHp.enabled;
         else el(m - 1).enabled = !el(m - 1).enabled;
     }
 
@@ -213,32 +336,58 @@ public class HudConfigScreen extends Screen {
         return (int) Math.floor(this.height / s());
     }
 
-    private void layoutPanel() {
-        int top = (int) Math.ceil(46 / s());
-        py = top;
-        ph = Math.max(80, vh() - top - 6);
-        pw = Math.min(vw() - 16, 460);
-        px = (vw() - pw) / 2;
+    private int bottom() {
+        return vh() - 10;
+    }
 
-        int avail = ph - 30 - 8;
-        cols = 3;
-        while (cols < 5 && ((MODULES + cols - 1) / cols) * (CARD_H + GAP) - GAP > avail) cols++;
-        cardW = (pw - 28 - (cols - 1) * GAP) / cols;
+    private void layoutPanel() {
+        ct = (int) Math.ceil(52 / s());
+        cw = vw() - 2 * cl;
+        gridY = ct + 16;
+        cols = Math.max(3, Math.min(6, cw / 104));
+        cardW = (cw - (cols - 1) * GAP) / cols;
+        int avail = bottom() - gridY - 16;
+        int rowsFit = Math.max(1, (avail + GAP) / (CARD_H + GAP));
+        perPage = cols * rowsFit;
+        pages = (MODULES + perPage - 1) / perPage;
+        page = Math.max(0, Math.min(page, pages - 1));
+        ncol = Math.max(2, Math.min(3, cw / 190));
+        colW = (cw - (ncol - 1) * 14) / ncol;
+    }
+
+    private int first() {
+        return page * perPage;
+    }
+
+    private int last() {
+        return Math.min(MODULES, first() + perPage);
     }
 
     private int cardX(int i) {
-        return px + 14 + (i % cols) * (cardW + GAP);
+        return cl + ((i - first()) % cols) * (cardW + GAP);
     }
 
     private int cardY(int i) {
-        return py + 30 + (i / cols) * (CARD_H + GAP);
+        return gridY + ((i - first()) / cols) * (CARD_H + GAP);
+    }
+
+    private int navY() {
+        return bottom() - 12;
+    }
+
+    private int editorX() {
+        return vw() - cl - 96;
+    }
+
+    private int editorY() {
+        return ct - 4;
     }
 
     private boolean inPreviewModule() {
         return (selected >= 1 && selected <= HudConfig.ELEMENTS) || selected == M_TARGET;
     }
 
-    /** Wiersze ustawień płyną w dwóch kolumnach; druga kolumna zaczyna się pod podglądem. */
+    /** Wiersze ustawień płyną w 2-3 kolumnach; druga kolumna zaczyna się pod podglądem. */
     private void layoutDetail(TextRenderer tr) {
         int n = rows.size();
         rowX = new int[n];
@@ -248,18 +397,18 @@ public class HudConfigScreen extends Screen {
         for (Row r : rows) lw = Math.max(lw, r.labelWidth(tr));
         rowLw = lw;
 
-        int colW = (pw - 28 - 14) / 2;
-        int top = py + 34;
-        int bottom = py + ph - 8;
-        int x = px + 14;
+        int top = ct + 20;
+        int bottom = bottom();
+        int col = 0;
+        int x = cl;
         int y = top;
-        boolean second = false;
+        boolean prev = inPreviewModule();
         for (int i = 0; i < n; i++) {
             Row r = rows.get(i);
-            if (!second && y + r.h > bottom) {
-                second = true;
-                x = px + 14 + colW + 14;
-                y = top + (inPreviewModule() ? PREVIEW_H + 6 : 0);
+            if (y + r.h > bottom && col < ncol - 1) {
+                col++;
+                x = cl + col * (colW + 14);
+                y = top + ((col == 1 && prev) ? PREVIEW_H + 6 : 0);
             }
             rowX[i] = x;
             rowY[i] = y;
@@ -270,13 +419,14 @@ public class HudConfigScreen extends Screen {
 
     // ------------------------------------------------------------------ rysowanie
 
-    // Bez rozmycia i przyciemnienia tła
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
     }
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        // tło na cały ekran
+        ctx.fillGradient(0, 0, this.width, this.height, Ui.panelTop(), Ui.bg());
         drawLogo(ctx);
 
         layoutPanel();
@@ -289,8 +439,12 @@ public class HudConfigScreen extends Screen {
         m.push();
         m.scale(sc, sc, 1f);
 
-        ctx.fill(px - 1, py - 1, px + pw + 1, py + ph + 1, Ui.border());
-        ctx.fillGradient(px, py, px + pw, py + ph, Ui.panelTop(), Ui.bg());
+        // przycisk edytora HUD (prawy górny róg)
+        boolean eh = vmx >= editorX() && vmx < editorX() + 96 && vmy >= editorY() && vmy < editorY() + 14;
+        Ui.roundRect(ctx, editorX(), editorY(), 96, 14, eh ? Ui.cardHover() : Ui.cardBorder());
+        Ui.roundRect(ctx, editorX() + 1, editorY() + 1, 94, 12, Ui.cardBg());
+        String eb = "EDYTOR HUD";
+        ctx.drawText(tr, eb, editorX() + (96 - tr.getWidth(eb)) / 2, editorY() + 3, Ui.accent(), false);
 
         boolean showField = false;
         if (selected < 0) {
@@ -305,9 +459,16 @@ public class HudConfigScreen extends Screen {
     }
 
     private void renderGrid(DrawContext ctx, TextRenderer tr, int mx, int my) {
-        ctx.drawText(tr, "TWOJE MODUŁY", px + 14, py + 12, Ui.text(), false);
-        for (int i = 0; i < MODULES; i++) {
+        ctx.drawText(tr, "TWOJE MODUŁY", cl, ct, Ui.text(), false);
+        for (int i = first(); i < last(); i++) {
             renderCard(ctx, tr, i, cardX(i), cardY(i), mx, my);
+        }
+        if (pages > 1) {
+            int cx = vw() / 2;
+            String pg = (page + 1) + "/" + pages;
+            ctx.drawText(tr, "<", cx - 40, navY() + 2, page > 0 ? Ui.accent() : Ui.muted(), false);
+            ctx.drawText(tr, pg, cx - tr.getWidth(pg) / 2, navY() + 2, Ui.text(), false);
+            ctx.drawText(tr, ">", cx + 34, navY() + 2, page < pages - 1 ? Ui.accent() : Ui.muted(), false);
         }
     }
 
@@ -322,15 +483,16 @@ public class HudConfigScreen extends Screen {
         ctx.drawText(tr, tag, x + 11, y + 8, Ui.accent(), false);
         ctx.drawText(tr, ">", x + cardW - 12, y + 8, Ui.muted(), false);
 
-        ctx.drawText(tr, tr.trimToWidth(NAMES[i], cardW - 12), x + 6, y + 23, Ui.text(), false);
-        ctx.drawText(tr, tr.trimToWidth(DESCS[i], cardW - 12), x + 6, y + 34, Ui.muted(), false);
+        ctx.drawText(tr, tr.trimToWidth(NAMES[i], cardW - 12), x + 6, y + 21, Ui.text(), false);
+        ctx.drawText(tr, tr.trimToWidth(DESCS[i], cardW - 12), x + 6, y + 31, Ui.muted(), false);
 
         if (hasToggle(i)) {
             boolean on = moduleOn(i);
-            ctx.drawText(tr, on ? "WŁĄCZONE" : "WYŁĄCZONE", x + 6, y + 46, on ? Ui.accent() : Ui.muted(), false);
+            String st = cardW >= 100 ? (on ? "WŁĄCZONE" : "WYŁĄCZONE") : (on ? "ON" : "OFF");
+            ctx.drawText(tr, st, x + 6, y + 42, on ? Ui.accent() : Ui.muted(), false);
             int sw = 22, sh = 10;
             int sx = x + cardW - 6 - sw;
-            int sy = y + 45;
+            int sy = y + 41;
             ctx.fill(sx, sy, sx + sw, sy + sh, on ? Ui.accent() : Ui.off());
             int kx = on ? sx + sw - sh + 1 : sx + 1;
             ctx.fill(kx, sy + 1, kx + sh - 2, sy + sh - 1, 0xFFFFFFFF);
@@ -339,26 +501,24 @@ public class HudConfigScreen extends Screen {
 
     /** Rysuje widok ustawień modułu. Zwraca true, gdy pole tekstowe ma być widoczne. */
     private boolean renderDetail(DrawContext ctx, TextRenderer tr, int mx, int my) {
-        // nagłówek: < WRÓĆ + tag + nazwa
         String back = "< WRÓĆ";
         int bw = tr.getWidth(back);
-        boolean backHover = mx >= px + 14 && mx < px + 14 + bw && my >= py + 8 && my < py + 22;
-        ctx.drawText(tr, back, px + 14, py + 12, backHover ? Ui.text() : Ui.accent(), false);
+        boolean backHover = mx >= cl && mx < cl + bw && my >= ct - 4 && my < ct + 10;
+        ctx.drawText(tr, back, cl, ct, backHover ? Ui.text() : Ui.accent(), false);
 
-        int nx = px + 14 + bw + 12;
+        int nx = cl + bw + 12;
         String tag = TAGS[selected];
         int tw = tr.getWidth(tag);
-        Ui.roundRect(ctx, nx, py + 9, tw + 10, 12, Ui.chipBg());
-        ctx.drawText(tr, tag, nx + 5, py + 11, Ui.accent(), false);
-        ctx.drawText(tr, NAMES[selected], nx + tw + 18, py + 12, Ui.text(), false);
+        Ui.roundRect(ctx, nx, ct - 3, tw + 10, 12, Ui.chipBg());
+        ctx.drawText(tr, tag, nx + 5, ct - 1, Ui.accent(), false);
+        ctx.drawText(tr, NAMES[selected], nx + tw + 18, ct, Ui.text(), false);
 
         layoutDetail(tr);
 
         // podgląd na żywo
         if (inPreviewModule()) {
-            int colW = (pw - 28 - 14) / 2;
-            int x2 = px + 14 + colW + 14;
-            int y2 = py + 34;
+            int x2 = cl + (colW + 14);
+            int y2 = ct + 20;
             Ui.roundRect(ctx, x2, y2, colW, PREVIEW_H, Ui.cardBorder());
             Ui.roundRect(ctx, x2 + 1, y2 + 1, colW - 2, PREVIEW_H - 2, Ui.cardBg());
             ctx.drawText(tr, "PODGLĄD", x2 + 8, y2 + 5, Ui.muted(), false);
@@ -366,8 +526,7 @@ public class HudConfigScreen extends Screen {
                     ? TargetHud.drawPreview(ctx, x2 + 8, y2 + 17, colW - 16, PREVIEW_H - 23)
                     : HudRenderer.drawPreview(ctx, selected - 1, x2 + 8, y2 + 17, colW - 16, PREVIEW_H - 23);
             if (!drawn) {
-                ctx.drawText(tr, "Brak podglądu (np. brak", x2 + 8, y2 + 24, Ui.muted(), false);
-                ctx.drawText(tr, "założonego pancerza).", x2 + 8, y2 + 35, Ui.muted(), false);
+                ctx.drawText(tr, "Brak podglądu.", x2 + 8, y2 + 24, Ui.muted(), false);
             }
         }
 
@@ -443,8 +602,21 @@ public class HudConfigScreen extends Screen {
 
         if (button != 0) return super.mouseClicked(vx, vy, button);
 
+        // przycisk Edytor HUD
+        if (vx >= editorX() && vx < editorX() + 96 && vy >= editorY() && vy < editorY() + 14) {
+            openEditor();
+            return true;
+        }
+
         if (selected < 0) {
-            for (int i = 0; i < MODULES; i++) {
+            // strony
+            if (pages > 1 && vy >= navY() && vy < navY() + 12) {
+                int cx = vw() / 2;
+                if (vx >= cx - 50 && vx < cx - 20) page = Math.max(0, page - 1);
+                else if (vx >= cx + 20 && vx < cx + 50) page = Math.min(pages - 1, page + 1);
+                return true;
+            }
+            for (int i = first(); i < last(); i++) {
                 int x = cardX(i), y = cardY(i);
                 if (vx >= x && vx < x + cardW && vy >= y && vy < y + CARD_H) {
                     boolean onToggle = hasToggle(i) && vx >= x + cardW - 34 && vy >= y + CARD_H - 18;
@@ -459,7 +631,7 @@ public class HudConfigScreen extends Screen {
         // widok ustawień
         TextRenderer tr = this.textRenderer;
         int bw = tr.getWidth("< WRÓĆ");
-        if (vx >= px + 14 && vx < px + 14 + bw && vy >= py + 8 && vy < py + 22) {
+        if (vx >= cl && vx < cl + bw && vy >= ct - 4 && vy < ct + 10) {
             selected = -1;
             rows.clear();
             activeRow = null;
@@ -495,6 +667,15 @@ public class HudConfigScreen extends Screen {
     }
 
     @Override
+    public boolean mouseScrolled(double mx, double my, double horizontalAmount, double verticalAmount) {
+        if (selected < 0 && pages > 1) {
+            page = Math.max(0, Math.min(pages - 1, page + (verticalAmount < 0 ? 1 : -1)));
+            return true;
+        }
+        return super.mouseScrolled(mx / s(), my / s(), horizontalAmount, verticalAmount);
+    }
+
+    @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         // ESC: z ustawień modułu wraca do listy, z listy zamyka ekran
         if (keyCode == 256 && selected >= 0 && !field.isFocused()) {
@@ -514,291 +695,5 @@ public class HudConfigScreen extends Screen {
     @Override
     public void close() {
         if (this.client != null) this.client.setScreen(parent);
-    }
-
-    // ------------------------------------------------------------------ wiersze
-
-    private abstract static class Row {
-        final int h;
-
-        Row(int h) {
-            this.h = h;
-        }
-
-        int labelWidth(TextRenderer tr) {
-            return 0;
-        }
-
-        abstract void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my);
-
-        void click(double mx, double my, int x, int w, int lw) {
-        }
-
-        void drag(double mx, double my, int x, int w, int lw) {
-        }
-    }
-
-    private static class ToggleRow extends Row {
-        private final String label;
-        private final BooleanSupplier get;
-        private final Consumer<Boolean> set;
-
-        ToggleRow(String label, BooleanSupplier get, Consumer<Boolean> set) {
-            super(16);
-            this.label = label;
-            this.get = get;
-            this.set = set;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            if (mx >= x && mx < x + w && my >= y && my < y + h) {
-                ctx.fill(x, y, x + w, y + h, Ui.hover());
-            }
-            ctx.drawText(tr, label, x + 2, y + 4, Ui.text(), false);
-            boolean on = get.getAsBoolean();
-            int sw = 22, sh = 10;
-            int sx = x + w - sw - 2;
-            int sy = y + 3;
-            ctx.fill(sx, sy, sx + sw, sy + sh, on ? Ui.accent() : Ui.off());
-            int kx = on ? sx + sw - sh + 1 : sx + 1;
-            ctx.fill(kx, sy + 1, kx + sh - 2, sy + sh - 1, 0xFFFFFFFF);
-        }
-
-        @Override
-        void click(double mx, double my, int x, int w, int lw) {
-            set.accept(!get.getAsBoolean());
-        }
-    }
-
-    private static class SliderRow extends Row {
-        private final String label;
-        private final int min, max, tint;
-        private final IntSupplier get;
-        private final IntConsumer set;
-
-        SliderRow(String label, int min, int max, IntSupplier get, IntConsumer set, int tint) {
-            super(14);
-            this.label = label;
-            this.min = min;
-            this.max = max;
-            this.get = get;
-            this.set = set;
-            this.tint = tint;
-        }
-
-        @Override
-        int labelWidth(TextRenderer tr) {
-            return tr.getWidth(label) + 6;
-        }
-
-        private void setFromMouse(double mx, int x, int w, int lw) {
-            int tw = w - lw - 26;
-            double t = (mx - (x + lw)) / tw;
-            t = Math.max(0, Math.min(1, t));
-            set.accept((int) Math.round(min + t * (max - min)));
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            int cy = y + h / 2;
-            ctx.drawText(tr, label, x + 2, cy - 4, Ui.text(), false);
-            int tx = x + lw;
-            int tw = w - lw - 26;
-            int v = Math.max(min, Math.min(max, get.getAsInt()));
-            double t = (v - min) / (double) (max - min);
-            int kx = tx + (int) Math.round(t * tw);
-            ctx.fill(tx, cy - 1, tx + tw, cy + 2, Ui.off());
-            ctx.fill(tx, cy - 1, kx, cy + 2, tint == 0 ? Ui.accent() : tint);
-            ctx.fill(kx - 2, cy - 5, kx + 2, cy + 6, 0xFFFFFFFF);
-            String s = String.valueOf(v);
-            ctx.drawText(tr, s, x + w - tr.getWidth(s) - 2, cy - 4, Ui.muted(), false);
-        }
-
-        @Override
-        void click(double mx, double my, int x, int w, int lw) {
-            if (mx >= x + lw - 6) setFromMouse(mx, x, w, lw);
-        }
-
-        @Override
-        void drag(double mx, double my, int x, int w, int lw) {
-            setFromMouse(mx, x, w, lw);
-        }
-    }
-
-    private static class HeadingRow extends Row {
-        private final String text;
-        private final IntSupplier swatch;
-
-        HeadingRow(String text, IntSupplier swatch) {
-            super(14);
-            this.text = text;
-            this.swatch = swatch;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            ctx.drawText(tr, text, x + 2, y + 3, Ui.accent(), false);
-            if (swatch != null) {
-                int sx = x + w - 22;
-                ctx.fill(sx - 1, y + 1, sx + 19, y + 13, Ui.border());
-                ctx.fill(sx, y + 2, sx + 18, y + 12, 0xFF000000 | swatch.getAsInt());
-            }
-        }
-    }
-
-    private static class TextRow extends Row {
-        private final String text;
-
-        TextRow(String text) {
-            super(11);
-            this.text = text;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            ctx.drawText(tr, text, x + 2, y + 2, Ui.muted(), false);
-        }
-    }
-
-    private static class ButtonRow extends Row {
-        private final String label;
-        private final Runnable action;
-
-        ButtonRow(String label, Runnable action) {
-            super(20);
-            this.label = label;
-            this.action = action;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            boolean hover = mx >= x && mx < x + w && my >= y + 2 && my < y + h;
-            ctx.fill(x, y + 2, x + w, y + h - 1, hover ? Ui.border() : Ui.off());
-            ctx.drawText(tr, label, x + (w - tr.getWidth(label)) / 2, y + 7, Ui.text(), false);
-        }
-
-        @Override
-        void click(double mx, double my, int x, int w, int lw) {
-            action.run();
-        }
-    }
-
-    private static class PresetRow extends Row {
-        private final int[] colors;
-        private final IntConsumer set;
-
-        PresetRow(int[] colors, IntConsumer set) {
-            super(18);
-            this.colors = colors;
-            this.set = set;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            for (int i = 0; i < colors.length; i++) {
-                int bx = x + 2 + i * 16;
-                ctx.fill(bx, y + 3, bx + 12, y + 15, 0xFF000000 | colors[i]);
-                if (mx >= bx && mx < bx + 12 && my >= y + 3 && my < y + 15) {
-                    Ui.outline(ctx, bx - 1, y + 2, 14, 14, Ui.text());
-                }
-            }
-        }
-
-        @Override
-        void click(double mx, double my, int x, int w, int lw) {
-            double rel = mx - (x + 2);
-            if (rel < 0) return;
-            int i = (int) (rel / 16);
-            if (i < colors.length && rel - i * 16 < 12) set.accept(colors[i]);
-        }
-    }
-
-    /** Gotowe motywy: tło + akcent jednym kliknięciem. */
-    private static class ThemeRow extends Row {
-        /** {akcent, tło} */
-        static final int[][] T = {
-                {0xFF4D6D, 0x07182E}, {0x5CE1E6, 0x141A22}, {0xB388FF, 0x120E24},
-                {0x66E08A, 0x0B1A14}, {0xFFE135, 0x14120A}
-        };
-        private final IntConsumer pick;
-
-        ThemeRow(IntConsumer pick) {
-            super(20);
-            this.pick = pick;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            for (int i = 0; i < T.length; i++) {
-                int bx = x + 2 + i * 24;
-                ctx.fill(bx, y + 3, bx + 20, y + 17, 0xFF000000 | T[i][1]);
-                ctx.fill(bx + 4, y + 8, bx + 16, y + 12, 0xFF000000 | T[i][0]);
-                Ui.outline(ctx, bx, y + 3, 20, 14, 0xFF000000 | T[i][0]);
-                if (mx >= bx && mx < bx + 20 && my >= y + 3 && my < y + 17) {
-                    Ui.outline(ctx, bx - 1, y + 2, 22, 16, Ui.text());
-                }
-            }
-        }
-
-        @Override
-        void click(double mx, double my, int x, int w, int lw) {
-            double rel = mx - (x + 2);
-            if (rel < 0) return;
-            int i = (int) (rel / 24);
-            if (i < T.length && rel - i * 24 < 20) pick.accept(i);
-        }
-    }
-
-    /** Rząd przycisków wyboru jednej wartości (np. rozmiar GUI). */
-    private static class ChoiceRow extends Row {
-        private final int[] values;
-        private final IntSupplier get;
-        private final IntConsumer set;
-
-        ChoiceRow(int[] values, IntSupplier get, IntConsumer set) {
-            super(18);
-            this.values = values;
-            this.get = get;
-            this.set = set;
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            int cw = w / values.length;
-            for (int i = 0; i < values.length; i++) {
-                int bx = x + i * cw;
-                boolean sel = get.getAsInt() == values[i];
-                boolean hover = mx >= bx && mx < bx + cw && my >= y + 2 && my < y + h - 2;
-                ctx.fill(bx + 1, y + 2, bx + cw - 1, y + h - 2, sel ? Ui.accent() : (hover ? Ui.border() : Ui.off()));
-                String t = String.valueOf(values[i]);
-                ctx.drawText(tr, t, bx + (cw - tr.getWidth(t)) / 2, y + 5, sel ? Ui.onAccent() : Ui.text(), false);
-            }
-        }
-
-        @Override
-        void click(double mx, double my, int x, int w, int lw) {
-            int cw = w / values.length;
-            int i = (int) ((mx - x) / cw);
-            if (i >= 0 && i < values.length) set.accept(values[i]);
-        }
-    }
-
-    /** Miejsce na pole tekstowe (samo pole jest zwykłym widgetem ustawianym w render). */
-    private static class FieldRow extends Row {
-        boolean shown;
-        int x, y, w;
-
-        FieldRow() {
-            super(22);
-        }
-
-        @Override
-        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
-            this.shown = true;
-            this.x = x;
-            this.y = y;
-            this.w = w;
-        }
     }
 }

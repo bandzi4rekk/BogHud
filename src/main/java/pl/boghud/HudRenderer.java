@@ -8,22 +8,25 @@ import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** Rysuje elementy HUD-a jako stos ciemnych ramek z pioruńmi w tle, jeden pod drugim. */
+/** Rysuje elementy HUD-a jako ciemne ramki z pioruńmi w tle, każdą w swoim miejscu na ekranie. */
 public final class HudRenderer {
     private static final EquipmentSlot[] ARMOR = {
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
     };
     private static final int PAD = 3;
-    private static final int GAP = 2;
     private static final int ICON_W = 11;
     private static final int BOLT_YELLOW = 0xFFFFE135;
     private static final int KEYS_W = 58;
     private static final int KEYS_H = 70;
+
+    /** Gdy true, HUD nie rysuje się sam - elementy rysuje edytor HUD. */
+    public static boolean editorOpen = false;
 
     /** Piksel-art pioruna: {początek x, szerokość} dla każdego z 8 wierszy (szerokość całości 7). */
     private static final int[][] BOLT = {
@@ -54,36 +57,48 @@ public final class HudRenderer {
 
         HudConfig c = HudMod.CONFIG;
         if (c == null || !c.enabled || mc.player == null || mc.options.hudHidden) return;
+        if (editorOpen) return; // edytor rysuje elementy sam
 
         TextRenderer tr = mc.textRenderer;
-        List<Box> boxes = new ArrayList<>();
         for (int i = 0; i < HudConfig.ELEMENTS; i++) {
-            if (!c.elements[i].enabled) continue;
-            Box b = buildBox(mc, c, tr, i);
-            if (b != null) boxes.add(b);
-        }
-        if (!boxes.isEmpty()) {
-            // wszystkie ramki tak samo szerokie, żeby stos wyglądał równo
-            float maxScreenW = 0;
-            for (Box b : boxes) maxScreenW = Math.max(maxScreenW, (b.w + 2 * PAD) * b.scale);
-
-            int y = c.stackY;
-            for (Box b : boxes) {
-                drawBox(ctx, tr, b, c.stackX, y, maxScreenW);
-                y += Math.round((b.h + 2 * PAD) * b.scale) + GAP;
-            }
+            HudConfig.Element e = c.elements[i];
+            if (!e.enabled) continue;
+            Box b = buildBox(mc, c, tr, i, false);
+            if (b != null) drawBox(ctx, tr, b, e.x, e.y);
         }
 
         TargetHud.render(ctx, mc, c);
+        CrosshairFx.render(ctx, mc, c);
     }
 
-    /** Podgląd jednego elementu (używany w oknie ustawień). Zwraca false, gdy nie ma czego pokazać. */
+    // ------------------------------------------------------------------ API dla edytora i podglądów
+
+    /** Rozmiar elementu w pikselach ekranu (z paddingiem i skalą) albo null. */
+    public static int[] sizeOf(int idx) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        HudConfig c = HudMod.CONFIG;
+        if (c == null || mc.player == null || idx < 0 || idx >= HudConfig.ELEMENTS) return null;
+        Box b = buildBox(mc, c, mc.textRenderer, idx, true);
+        if (b == null) return null;
+        return new int[]{Math.round((b.w + 2 * PAD) * b.scale), Math.round((b.h + 2 * PAD) * b.scale)};
+    }
+
+    /** Rysuje element w podanym miejscu (do edytora). */
+    public static void drawAt(DrawContext ctx, int idx, int x, int y) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        HudConfig c = HudMod.CONFIG;
+        if (c == null || mc.player == null || idx < 0 || idx >= HudConfig.ELEMENTS) return;
+        Box b = buildBox(mc, c, mc.textRenderer, idx, true);
+        if (b != null) drawBox(ctx, mc.textRenderer, b, x, y);
+    }
+
+    /** Podgląd jednego elementu (okno ustawień). Zwraca false, gdy nie ma czego pokazać. */
     public static boolean drawPreview(DrawContext ctx, int idx, int x, int y, float maxW, float maxH) {
         HudConfig c = HudMod.CONFIG;
         MinecraftClient mc = MinecraftClient.getInstance();
         if (c == null || mc.player == null || idx < 0 || idx >= HudConfig.ELEMENTS) return false;
         TextRenderer tr = mc.textRenderer;
-        Box b = buildBox(mc, c, tr, idx);
+        Box b = buildBox(mc, c, tr, idx, true);
         if (b == null) return false;
 
         float bw = (b.w + 2 * PAD) * b.scale;
@@ -94,12 +109,14 @@ public final class HudRenderer {
         m.push();
         m.translate(x, y, 0f);
         m.scale(pf, pf, 1f);
-        drawBox(ctx, tr, b, 0, 0, bw);
+        drawBox(ctx, tr, b, 0, 0);
         m.pop();
         return true;
     }
 
-    private static Box buildBox(MinecraftClient mc, HudConfig c, TextRenderer tr, int i) {
+    // ------------------------------------------------------------------ budowanie i rysowanie ramek
+
+    private static Box buildBox(MinecraftClient mc, HudConfig c, TextRenderer tr, int i, boolean editor) {
         if (mc.player == null) return null;
         Box b = new Box();
         b.e = c.elements[i];
@@ -112,6 +129,8 @@ public final class HudRenderer {
             case 1:
                 if (c.customText != null && !c.customText.isEmpty()) {
                     b.rows.add(new String[]{c.customText, ""});
+                } else if (editor) {
+                    b.rows.add(new String[]{"Tekst", ""});
                 }
                 break;
             case 2:
@@ -134,6 +153,13 @@ public final class HudRenderer {
                 for (EquipmentSlot slot : ARMOR) {
                     ItemStack stack = mc.player.getEquippedStack(slot);
                     if (!stack.isEmpty()) b.armor.add(stack);
+                }
+                if (b.armor.isEmpty() && editor) {
+                    // w edytorze i podglądzie pokazujemy przykładowy pancerz
+                    b.armor.add(new ItemStack(Items.DIAMOND_HELMET));
+                    b.armor.add(new ItemStack(Items.DIAMOND_CHESTPLATE));
+                    b.armor.add(new ItemStack(Items.DIAMOND_LEGGINGS));
+                    b.armor.add(new ItemStack(Items.DIAMOND_BOOTS));
                 }
                 break;
             case 6:
@@ -165,7 +191,7 @@ public final class HudRenderer {
         return b;
     }
 
-    private static void drawBox(DrawContext ctx, TextRenderer tr, Box b, int sx, int sy, float maxScreenW) {
+    private static void drawBox(DrawContext ctx, TextRenderer tr, Box b, int sx, int sy) {
         HudConfig.Element e = b.e;
         int accent = 0xFF000000 | e.accentColor;
         int text = 0xFF000000 | e.textColor;
@@ -178,7 +204,7 @@ public final class HudRenderer {
 
         int left = Math.round(sx / s);
         int top = Math.round(sy / s);
-        int boxW = Math.round(maxScreenW / s);
+        int boxW = b.w + 2 * PAD;
         int boxH = b.h + 2 * PAD;
         int x = left + PAD;
         int y = top + PAD;

@@ -25,6 +25,12 @@ public final class Target {
         });
     }
 
+    /** Czy celownik wskazuje teraz jakiegoś żywego stwora. */
+    public static boolean looking() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return mc.player != null && mc.targetedEntity instanceof LivingEntity;
+    }
+
     public static LivingEntity get() {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null) return null;

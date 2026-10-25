@@ -57,6 +57,24 @@ public final class TargetHud {
         return true;
     }
 
+    /** Rozmiar ramki z przykładowym celem (dla edytora HUD). */
+    public static int[] size() {
+        HudConfig c = HudMod.CONFIG;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (c == null) return null;
+        int[] sz = measure(mc.textRenderer, "Steve", 14f, 20f, 0f, 3.2);
+        float s = Math.max(0.5f, c.target.scalePercent / 100f);
+        return new int[]{Math.round((sz[0] + 2 * PAD) * s), Math.round((sz[1] + 2 * PAD) * s)};
+    }
+
+    /** Rysuje ramkę z przykładowym celem w podanym miejscu (dla edytora HUD). */
+    public static void drawAt(DrawContext ctx, int sx, int sy) {
+        HudConfig c = HudMod.CONFIG;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (c == null) return;
+        draw(ctx, mc.textRenderer, c.target, "Steve", 14f, 20f, 0f, 14f, 3.2, sx, sy);
+    }
+
     private static String hpText(float hp, float maxHp, float abs) {
         String s = String.format(Locale.ROOT, "%.1f/%.0f", hp, maxHp);
         if (abs > 0) s += " +" + (int) abs;

@@ -33,5 +33,8 @@ public class HudMod implements ClientModInitializer {
         HudRenderCallback.EVENT.register(HudRenderer::render);
         Target.init();
         TargetRing.init();
+        NickHp.init();
+        Visuals3D.init();
+        HitFx.init();
     }
 }
