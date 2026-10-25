@@ -8,17 +8,15 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 /** Ustawienia moda, zapisywane w config/boghud.json */
 public class HudConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("boghud.json");
 
-    public static final int ELEMENTS = 6;
-    public static final int WINDOWS = 8; // Ogólne + 6 elementów + Ustawienia GUI
-    /** Kolejność = kolejność układania HUD-a od góry. */
-    public static final String[] NAMES = {"Nick", "Tekst", "FPS", "Ping", "Koordynaty", "Pancerz"};
+    public static final int ELEMENTS = 8;
+    /** Kolejność = kolejność układania HUD-a od góry. Nowe elementy tylko na końcu! */
+    public static final String[] NAMES = {"Nick", "Tekst", "FPS", "Ping", "Koordynaty", "Pancerz", "CPS", "Klawisze"};
 
     /** Jeden element HUD-a (osobna ramka z własnymi ustawieniami). */
     public static class Element {
@@ -31,6 +29,15 @@ public class HudConfig {
         public boolean shadow = true;
     }
 
+    /** Pierścień wokół celu (efekt 3D). */
+    public static class Ring {
+        public boolean enabled = true;
+        public int color = 0xFF4D6D;
+        public int alpha = 200;
+        public int radiusPercent = 100;
+        public boolean animate = true;
+    }
+
     public boolean enabled = true;
     public String customText = "Bog HUD";
     public Element[] elements = defaultElements();
@@ -39,14 +46,19 @@ public class HudConfig {
     public int stackX = 4;
     public int stackY = 4;
 
-    // Ustawienia GUI (kolory i rozmiar okien)
-    public int guiAccent = 0x5CE1E6;
-    public int guiBackground = 0x141A22;
-    public int guiAlpha = 235;
-    public int guiScale = 100;
+    /** Target HUD: osobna ramka przy celowniku (przesunięcie od środka ekranu). */
+    public Element target = defaultTarget();
+    public int targetX = 24;
+    public int targetY = 24;
+    public Ring ring = new Ring();
 
-    /** Które okna ustawień są zwinięte. */
-    public boolean[] winCollapsed = collapsedAll();
+    // Ustawienia GUI (kolory i rozmiar okna ustawień). Domyślnie granatowy motyw z różowym akcentem.
+    public int guiAccent = 0xFF4D6D;
+    public int guiBackground = 0x07182E;
+    public int guiAlpha = 245;
+    public int guiScale = 100;
+    /** 0 = config sprzed nowego wyglądu; przy wczytaniu ustawiamy nowy motyw jeden raz. */
+    public int guiVersion = 0;
 
     private static Element[] defaultElements() {
         Element[] a = new Element[ELEMENTS];
@@ -56,24 +68,37 @@ public class HudConfig {
         return a;
     }
 
-    private static boolean[] collapsedAll() {
-        boolean[] a = new boolean[WINDOWS];
-        Arrays.fill(a, true);
-        return a;
+    private static Element defaultTarget() {
+        Element e = new Element();
+        e.accentColor = 0xFF4D6D;
+        return e;
     }
 
     /** Naprawia braki (np. po wczytaniu configu ze starszej wersji moda). */
     public void fixup() {
         if (customText == null) customText = "";
-        if (elements == null || elements.length != ELEMENTS) {
-            elements = defaultElements();
+        if (target == null) target = defaultTarget();
+        if (ring == null) ring = new Ring();
+        Element[] d = defaultElements();
+        if (elements == null) {
+            elements = d;
+        } else if (elements.length != ELEMENTS) {
+            // zachowujemy stare ustawienia, nowe elementy dostają domyślne
+            for (int i = 0; i < Math.min(elements.length, ELEMENTS); i++) {
+                if (elements[i] != null) d[i] = elements[i];
+            }
+            elements = d;
         } else {
-            Element[] d = defaultElements();
             for (int i = 0; i < ELEMENTS; i++) {
                 if (elements[i] == null) elements[i] = d[i];
             }
         }
-        if (winCollapsed == null || winCollapsed.length != WINDOWS) winCollapsed = collapsedAll();
+        if (guiVersion < 2) {
+            guiAccent = 0xFF4D6D;
+            guiBackground = 0x07182E;
+            guiAlpha = 245;
+            guiVersion = 2;
+        }
     }
 
     public static HudConfig load() {
@@ -89,6 +114,7 @@ public class HudConfig {
             }
         }
         HudConfig c = new HudConfig();
+        c.fixup();
         c.save();
         return c;
     }

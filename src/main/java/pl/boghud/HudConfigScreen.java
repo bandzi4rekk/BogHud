@@ -16,26 +16,44 @@ import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 
 /**
- * Ekran ustawień w stylu "ClickGUI": okna ułożone na stałe (bez przesuwania) w kolumnach,
- * kliknięcie tytułu zwija / rozwija okno. Jedno okno na każdy element HUD-a, okno Ogólne
- * i okno Ustawienia GUI (rozmiar i kolory okien).
+ * Ekran ustawień w stylu "TWOJE MODUŁY": ciemny panel z kartami modułów (tag, nazwa, opis, przełącznik).
+ * Kliknięcie karty otwiera jej ustawienia z podglądem na żywo, strzałka "< WRÓĆ" wraca do listy.
  */
 public class HudConfigScreen extends Screen {
-    private static final int WIN_W = 150;
-    private static final int TITLE_H = 16;
-    private static final int PAD = 4;
+    private static final int CARD_H = 58;
+    private static final int GAP = 6;
+    private static final int PREVIEW_H = 86;
     private static final int RED = 0xFFE05555;
     private static final int GREEN = 0xFF55E077;
     private static final int BLUE = 0xFF5599E0;
-    private static final int[] PRESETS = {0x5CE1E6, 0xB388FF, 0xFF5C7A, 0x66E08A, 0xFFB45C, 0xFFFFFF};
+    private static final int[] PRESETS = {0xFF4D6D, 0x5CE1E6, 0xB388FF, 0x66E08A, 0xFFB45C, 0xFFFFFF};
+
+    /** Moduły: 0 = Ogólne, 1..ELEMENTS = elementy HUD, potem Target HUD, Target Ring i Motyw GUI. */
+    private static final int M_TARGET = HudConfig.ELEMENTS + 1;
+    private static final int M_RING = HudConfig.ELEMENTS + 2;
+    private static final int M_GUI = HudConfig.ELEMENTS + 3;
+    private static final int MODULES = HudConfig.ELEMENTS + 4;
+    private static final String[] TAGS = {"HUD", "NICK", "TEXT", "FPS", "PING", "XYZ", "ARMOR", "CPS", "KEYS",
+            "TARGET", "RING", "GUI"};
+    private static final String[] NAMES = {"Ogólne", "Nick", "Tekst", "FPS", "Ping", "Koordynaty", "Pancerz",
+            "Licznik CPS", "Klawisze", "Target HUD", "Target Ring", "Motyw GUI"};
+    private static final String[] DESCS = {"Pozycja HUD i reset", "Twój nick z piorunem", "Własny napis",
+            "Klatki na sekundę", "Opóźnienie do serwera", "Pozycja X, Y, Z", "Ikony i wytrzymałość",
+            "Kliknięcia LPM i PPM", "WASD, spacja i myszka", "Info o celu walki",
+            "Pierścień wokół celu", "Kolory i rozmiar okna"};
 
     private final Screen parent;
-    private final List<Window> windows = new ArrayList<>();
     private TextFieldWidget field;
-    private FieldRow fieldRow;
+    private FieldRow fieldRow = new FieldRow();
+    private final List<Row> rows = new ArrayList<>();
+    private int[] rowX = new int[0], rowY = new int[0], rowW = new int[0];
+    private int rowLw;
 
-    private Window activeWin;
+    private int selected = -1; // -1 = lista modułów
     private Row activeRow;
+    private int activeX, activeW;
+
+    private int px, py, pw, ph, cols, cardW;
 
     public HudConfigScreen(Screen parent) {
         super(Text.literal("Bog HUD"));
@@ -50,117 +68,209 @@ public class HudConfigScreen extends Screen {
         return HudMod.CONFIG.elements[i];
     }
 
-    // ------------------------------------------------------------------ budowa okien
+    // ------------------------------------------------------------------ init i budowa ustawień modułu
 
     @Override
     protected void init() {
-        windows.clear();
-        activeWin = null;
-        activeRow = null;
-
-        field = new TextFieldWidget(this.textRenderer, 0, 0, WIN_W - 2 * PAD, 16, Text.literal("Napis"));
+        field = new TextFieldWidget(this.textRenderer, 0, 0, 100, 16, Text.literal("Napis"));
         field.setMaxLength(64);
         field.setText(c().customText == null ? "" : c().customText);
         field.setChangedListener(s -> c().customText = s);
         field.visible = false;
         addDrawableChild(field);
-        fieldRow = new FieldRow();
 
+        activeRow = null;
+        if (selected >= 0) openModule(selected);
+        else rows.clear();
+    }
+
+    private void openModule(int m) {
+        selected = m;
+        rows.clear();
+        fieldRow = new FieldRow();
+        activeRow = null;
+        if (m == 0) buildGeneral();
+        else if (m == M_GUI) buildGui();
+        else if (m == M_TARGET) buildTarget();
+        else if (m == M_RING) buildRing();
+        else buildElement(m - 1);
+    }
+
+    private void buildGeneral() {
         final int mw = Math.max(1, this.width);
         final int mh = Math.max(1, this.height);
-
-        // 0: Ogólne
-        Window general = new Window(0, "Ogólne");
-        general.rows.add(new ToggleRow("HUD włączony", () -> c().enabled, v -> c().enabled = v));
-        general.rows.add(new SliderRow("HUD X", 0, mw, () -> c().stackX, v -> c().stackX = v, 0));
-        general.rows.add(new SliderRow("HUD Y", 0, mh, () -> c().stackY, v -> c().stackY = v, 0));
-        general.rows.add(new TextRow("Elementy HUD układają się"));
-        general.rows.add(new TextRow("jeden pod drugim. Kliknij"));
-        general.rows.add(new TextRow("tytuł okna, żeby je zwinąć"));
-        general.rows.add(new TextRow("lub rozwinąć."));
-        general.rows.add(new ButtonRow("Reset wszystkiego", () -> {
+        rows.add(new ToggleRow("HUD włączony", () -> c().enabled, v -> c().enabled = v));
+        rows.add(new SliderRow("HUD X", 0, mw, () -> c().stackX, v -> c().stackX = v, 0));
+        rows.add(new SliderRow("HUD Y", 0, mh, () -> c().stackY, v -> c().stackY = v, 0));
+        rows.add(new TextRow("Elementy HUD układają się"));
+        rows.add(new TextRow("jeden pod drugim."));
+        rows.add(new ButtonRow("Reset wszystkiego", () -> {
             HudMod.CONFIG = new HudConfig();
+            HudMod.CONFIG.fixup();
             HudMod.CONFIG.save();
             clearAndInit();
         }));
-        windows.add(general);
-
-        // 1..6: elementy HUD
-        for (int ei = 0; ei < HudConfig.ELEMENTS; ei++) {
-            Window w = new Window(ei + 1, HudConfig.NAMES[ei]);
-            buildElement(w, ei);
-            windows.add(w);
-        }
-
-        // 7: Ustawienia GUI (rozmiar i kolory okien)
-        Window theme = new Window(7, "Ustawienia GUI");
-        theme.rows.add(new HeadingRow("Rozmiar GUI (%)", null));
-        theme.rows.add(new ChoiceRow(new int[]{70, 85, 100, 125, 150}, () -> c().guiScale, v -> c().guiScale = v));
-        theme.rows.add(new HeadingRow("Akcent GUI", () -> c().guiAccent));
-        theme.rows.add(new PresetRow(PRESETS, v -> c().guiAccent = v));
-        addChannels(theme, () -> c().guiAccent, v -> c().guiAccent = v);
-        theme.rows.add(new HeadingRow("Tło GUI", () -> c().guiBackground));
-        addChannels(theme, () -> c().guiBackground, v -> c().guiBackground = v);
-        theme.rows.add(new SliderRow("Krycie", 80, 255, () -> c().guiAlpha, v -> c().guiAlpha = v, 0));
-        windows.add(theme);
-
-        layoutWindows();
     }
 
-    private void buildElement(Window w, int ei) {
+    private void buildElement(int ei) {
         if (ei == 1) { // element "Tekst" ma pole na własny napis
-            w.rows.add(new HeadingRow("Napis", null));
-            w.rows.add(fieldRow);
+            rows.add(new HeadingRow("Napis", null));
+            rows.add(fieldRow);
         }
-        w.rows.add(new ToggleRow("Włączony", () -> el(ei).enabled, v -> el(ei).enabled = v));
-        w.rows.add(new SliderRow("Skala %", 50, 200, () -> el(ei).scalePercent, v -> el(ei).scalePercent = v, 0));
-        w.rows.add(new HeadingRow("Kolor tekstu", () -> el(ei).textColor));
-        addChannels(w, () -> el(ei).textColor, v -> el(ei).textColor = v);
-        w.rows.add(new HeadingRow("Kolor akcentu", () -> el(ei).accentColor));
-        addChannels(w, () -> el(ei).accentColor, v -> el(ei).accentColor = v);
-        w.rows.add(new ToggleRow("Tło z piorunami", () -> el(ei).background, v -> el(ei).background = v));
-        w.rows.add(new SliderRow("Krycie tła", 0, 255, () -> el(ei).backgroundAlpha, v -> el(ei).backgroundAlpha = v, 0));
-        w.rows.add(new ToggleRow("Cień tekstu", () -> el(ei).shadow, v -> el(ei).shadow = v));
+        rows.add(new ToggleRow("Włączony", () -> el(ei).enabled, v -> el(ei).enabled = v));
+        rows.add(new SliderRow("Skala %", 50, 200, () -> el(ei).scalePercent, v -> el(ei).scalePercent = v, 0));
+        rows.add(new HeadingRow("Kolor tekstu", () -> el(ei).textColor));
+        addChannels(() -> el(ei).textColor, v -> el(ei).textColor = v);
+        rows.add(new HeadingRow("Kolor akcentu", () -> el(ei).accentColor));
+        addChannels(() -> el(ei).accentColor, v -> el(ei).accentColor = v);
+        rows.add(new ToggleRow("Tło z piorunami", () -> el(ei).background, v -> el(ei).background = v));
+        rows.add(new SliderRow("Krycie tła", 0, 255, () -> el(ei).backgroundAlpha, v -> el(ei).backgroundAlpha = v, 0));
+        rows.add(new ToggleRow("Cień tekstu", () -> el(ei).shadow, v -> el(ei).shadow = v));
     }
 
-    private void addChannels(Window w, IntSupplier get, IntConsumer set) {
-        w.rows.add(new SliderRow("R", 0, 255, () -> (get.getAsInt() >> 16) & 255,
+    private void buildTarget() {
+        rows.add(new ToggleRow("Włączony", () -> c().target.enabled, v -> c().target.enabled = v));
+        rows.add(new SliderRow("Skala %", 50, 200, () -> c().target.scalePercent, v -> c().target.scalePercent = v, 0));
+        rows.add(new SliderRow("Offset X", -300, 300, () -> c().targetX, v -> c().targetX = v, 0));
+        rows.add(new SliderRow("Offset Y", -200, 200, () -> c().targetY, v -> c().targetY = v, 0));
+        rows.add(new HeadingRow("Kolor tekstu", () -> c().target.textColor));
+        addChannels(() -> c().target.textColor, v -> c().target.textColor = v);
+        rows.add(new HeadingRow("Kolor akcentu", () -> c().target.accentColor));
+        addChannels(() -> c().target.accentColor, v -> c().target.accentColor = v);
+        rows.add(new ToggleRow("Tło z piorunami", () -> c().target.background, v -> c().target.background = v));
+        rows.add(new SliderRow("Krycie tła", 0, 255, () -> c().target.backgroundAlpha, v -> c().target.backgroundAlpha = v, 0));
+        rows.add(new ToggleRow("Cień tekstu", () -> c().target.shadow, v -> c().target.shadow = v));
+    }
+
+    private void buildRing() {
+        rows.add(new ToggleRow("Włączony", () -> c().ring.enabled, v -> c().ring.enabled = v));
+        rows.add(new SliderRow("Promień %", 50, 200, () -> c().ring.radiusPercent, v -> c().ring.radiusPercent = v, 0));
+        rows.add(new ToggleRow("Ruch góra-dół", () -> c().ring.animate, v -> c().ring.animate = v));
+        rows.add(new SliderRow("Krycie", 20, 255, () -> c().ring.alpha, v -> c().ring.alpha = v, 0));
+        rows.add(new HeadingRow("Kolor pierścienia", () -> c().ring.color));
+        addChannels(() -> c().ring.color, v -> c().ring.color = v);
+        rows.add(new TextRow("Pierścień pojawia się wokół"));
+        rows.add(new TextRow("celu, na którego patrzysz"));
+        rows.add(new TextRow("albo którego ostatnio uderzyłeś."));
+    }
+
+    private void buildGui() {
+        rows.add(new HeadingRow("Rozmiar GUI (%)", null));
+        rows.add(new ChoiceRow(new int[]{70, 85, 100, 125, 150}, () -> c().guiScale, v -> c().guiScale = v));
+        rows.add(new HeadingRow("Gotowe motywy", null));
+        rows.add(new ThemeRow(i -> {
+            c().guiAccent = ThemeRow.T[i][0];
+            c().guiBackground = ThemeRow.T[i][1];
+        }));
+        rows.add(new HeadingRow("Akcent GUI", () -> c().guiAccent));
+        rows.add(new PresetRow(PRESETS, v -> c().guiAccent = v));
+        addChannels(() -> c().guiAccent, v -> c().guiAccent = v);
+        rows.add(new HeadingRow("Tło GUI", () -> c().guiBackground));
+        addChannels(() -> c().guiBackground, v -> c().guiBackground = v);
+        rows.add(new SliderRow("Krycie", 80, 255, () -> c().guiAlpha, v -> c().guiAlpha = v, 0));
+    }
+
+    private void addChannels(IntSupplier get, IntConsumer set) {
+        rows.add(new SliderRow("R", 0, 255, () -> (get.getAsInt() >> 16) & 255,
                 v -> set.accept((get.getAsInt() & 0x00FFFF) | (v << 16)), RED));
-        w.rows.add(new SliderRow("G", 0, 255, () -> (get.getAsInt() >> 8) & 255,
+        rows.add(new SliderRow("G", 0, 255, () -> (get.getAsInt() >> 8) & 255,
                 v -> set.accept((get.getAsInt() & 0xFF00FF) | (v << 8)), GREEN));
-        w.rows.add(new SliderRow("B", 0, 255, () -> get.getAsInt() & 255,
+        rows.add(new SliderRow("B", 0, 255, () -> get.getAsInt() & 255,
                 v -> set.accept((get.getAsInt() & 0xFFFF00) | v), BLUE));
     }
 
-    // skala okien ustawień (rozmiar GUI)
+    // ------------------------------------------------------------------ moduły (karty)
+
+    private boolean hasToggle(int m) {
+        return m != M_GUI;
+    }
+
+    private boolean moduleOn(int m) {
+        if (m == 0) return c().enabled;
+        if (m == M_TARGET) return c().target.enabled;
+        if (m == M_RING) return c().ring.enabled;
+        return el(m - 1).enabled;
+    }
+
+    private void toggleModule(int m) {
+        if (m == 0) c().enabled = !c().enabled;
+        else if (m == M_TARGET) c().target.enabled = !c().target.enabled;
+        else if (m == M_RING) c().ring.enabled = !c().ring.enabled;
+        else el(m - 1).enabled = !el(m - 1).enabled;
+    }
+
+    // ------------------------------------------------------------------ układ
+
     private double s() {
         return Math.max(0.5, c().guiScale / 100.0);
+    }
+
+    private int vw() {
+        return (int) Math.floor(this.width / s());
     }
 
     private int vh() {
         return (int) Math.floor(this.height / s());
     }
 
-    /** Układa okna na stałe w kolumnach, od góry do dołu (pod napisem BOG CODE). */
-    private void layoutWindows() {
+    private void layoutPanel() {
         int top = (int) Math.ceil(46 / s());
-        int vh = vh();
-        int x = 8, y = top;
-        for (Window w : windows) {
-            int h = w.height();
-            if (y + h > vh - 6 && y > top) {
-                x += WIN_W + 6;
-                y = top;
+        py = top;
+        ph = Math.max(80, vh() - top - 6);
+        pw = Math.min(vw() - 16, 460);
+        px = (vw() - pw) / 2;
+
+        int avail = ph - 30 - 8;
+        cols = 3;
+        while (cols < 5 && ((MODULES + cols - 1) / cols) * (CARD_H + GAP) - GAP > avail) cols++;
+        cardW = (pw - 28 - (cols - 1) * GAP) / cols;
+    }
+
+    private int cardX(int i) {
+        return px + 14 + (i % cols) * (cardW + GAP);
+    }
+
+    private int cardY(int i) {
+        return py + 30 + (i / cols) * (CARD_H + GAP);
+    }
+
+    private boolean inPreviewModule() {
+        return (selected >= 1 && selected <= HudConfig.ELEMENTS) || selected == M_TARGET;
+    }
+
+    /** Wiersze ustawień płyną w dwóch kolumnach; druga kolumna zaczyna się pod podglądem. */
+    private void layoutDetail(TextRenderer tr) {
+        int n = rows.size();
+        rowX = new int[n];
+        rowY = new int[n];
+        rowW = new int[n];
+        int lw = 0;
+        for (Row r : rows) lw = Math.max(lw, r.labelWidth(tr));
+        rowLw = lw;
+
+        int colW = (pw - 28 - 14) / 2;
+        int top = py + 34;
+        int bottom = py + ph - 8;
+        int x = px + 14;
+        int y = top;
+        boolean second = false;
+        for (int i = 0; i < n; i++) {
+            Row r = rows.get(i);
+            if (!second && y + r.h > bottom) {
+                second = true;
+                x = px + 14 + colW + 14;
+                y = top + (inPreviewModule() ? PREVIEW_H + 6 : 0);
             }
-            w.x = x;
-            w.y = y;
-            y += h + 4;
+            rowX[i] = x;
+            rowY[i] = y;
+            rowW[i] = colW;
+            y += r.h;
         }
     }
 
     // ------------------------------------------------------------------ rysowanie
 
-    // Bez rozmycia i przyciemnienia, żeby HUD był widoczny na żywo
+    // Bez rozmycia i przyciemnienia tła
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
     }
@@ -169,29 +279,109 @@ public class HudConfigScreen extends Screen {
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
         drawLogo(ctx);
 
-        layoutWindows();
+        layoutPanel();
         float sc = (float) s();
         int vmx = (int) Math.round(mouseX / s());
         int vmy = (int) Math.round(mouseY / s());
+        TextRenderer tr = this.textRenderer;
 
         MatrixStack m = ctx.getMatrices();
         m.push();
         m.scale(sc, sc, 1f);
 
-        fieldRow.shown = false;
-        for (Window w : windows) renderWindow(ctx, w, vmx, vmy);
+        ctx.fill(px - 1, py - 1, px + pw + 1, py + ph + 1, Ui.border());
+        ctx.fillGradient(px, py, px + pw, py + ph, Ui.panelTop(), Ui.bg());
 
+        boolean showField = false;
+        if (selected < 0) {
+            renderGrid(ctx, tr, vmx, vmy);
+        } else {
+            showField = renderDetail(ctx, tr, vmx, vmy);
+        }
+        field.visible = showField;
+
+        super.render(ctx, vmx, vmy, delta);
+        m.pop();
+    }
+
+    private void renderGrid(DrawContext ctx, TextRenderer tr, int mx, int my) {
+        ctx.drawText(tr, "TWOJE MODUŁY", px + 14, py + 12, Ui.text(), false);
+        for (int i = 0; i < MODULES; i++) {
+            renderCard(ctx, tr, i, cardX(i), cardY(i), mx, my);
+        }
+    }
+
+    private void renderCard(DrawContext ctx, TextRenderer tr, int i, int x, int y, int mx, int my) {
+        boolean hover = mx >= x && mx < x + cardW && my >= y && my < y + CARD_H;
+        Ui.roundRect(ctx, x, y, cardW, CARD_H, hover ? Ui.cardHover() : Ui.cardBorder());
+        Ui.roundRect(ctx, x + 1, y + 1, cardW - 2, CARD_H - 2, Ui.cardBg());
+
+        String tag = TAGS[i];
+        int tw = tr.getWidth(tag);
+        Ui.roundRect(ctx, x + 6, y + 6, tw + 10, 12, Ui.chipBg());
+        ctx.drawText(tr, tag, x + 11, y + 8, Ui.accent(), false);
+        ctx.drawText(tr, ">", x + cardW - 12, y + 8, Ui.muted(), false);
+
+        ctx.drawText(tr, tr.trimToWidth(NAMES[i], cardW - 12), x + 6, y + 23, Ui.text(), false);
+        ctx.drawText(tr, tr.trimToWidth(DESCS[i], cardW - 12), x + 6, y + 34, Ui.muted(), false);
+
+        if (hasToggle(i)) {
+            boolean on = moduleOn(i);
+            ctx.drawText(tr, on ? "WŁĄCZONE" : "WYŁĄCZONE", x + 6, y + 46, on ? Ui.accent() : Ui.muted(), false);
+            int sw = 22, sh = 10;
+            int sx = x + cardW - 6 - sw;
+            int sy = y + 45;
+            ctx.fill(sx, sy, sx + sw, sy + sh, on ? Ui.accent() : Ui.off());
+            int kx = on ? sx + sw - sh + 1 : sx + 1;
+            ctx.fill(kx, sy + 1, kx + sh - 2, sy + sh - 1, 0xFFFFFFFF);
+        }
+    }
+
+    /** Rysuje widok ustawień modułu. Zwraca true, gdy pole tekstowe ma być widoczne. */
+    private boolean renderDetail(DrawContext ctx, TextRenderer tr, int mx, int my) {
+        // nagłówek: < WRÓĆ + tag + nazwa
+        String back = "< WRÓĆ";
+        int bw = tr.getWidth(back);
+        boolean backHover = mx >= px + 14 && mx < px + 14 + bw && my >= py + 8 && my < py + 22;
+        ctx.drawText(tr, back, px + 14, py + 12, backHover ? Ui.text() : Ui.accent(), false);
+
+        int nx = px + 14 + bw + 12;
+        String tag = TAGS[selected];
+        int tw = tr.getWidth(tag);
+        Ui.roundRect(ctx, nx, py + 9, tw + 10, 12, Ui.chipBg());
+        ctx.drawText(tr, tag, nx + 5, py + 11, Ui.accent(), false);
+        ctx.drawText(tr, NAMES[selected], nx + tw + 18, py + 12, Ui.text(), false);
+
+        layoutDetail(tr);
+
+        // podgląd na żywo
+        if (inPreviewModule()) {
+            int colW = (pw - 28 - 14) / 2;
+            int x2 = px + 14 + colW + 14;
+            int y2 = py + 34;
+            Ui.roundRect(ctx, x2, y2, colW, PREVIEW_H, Ui.cardBorder());
+            Ui.roundRect(ctx, x2 + 1, y2 + 1, colW - 2, PREVIEW_H - 2, Ui.cardBg());
+            ctx.drawText(tr, "PODGLĄD", x2 + 8, y2 + 5, Ui.muted(), false);
+            boolean drawn = selected == M_TARGET
+                    ? TargetHud.drawPreview(ctx, x2 + 8, y2 + 17, colW - 16, PREVIEW_H - 23)
+                    : HudRenderer.drawPreview(ctx, selected - 1, x2 + 8, y2 + 17, colW - 16, PREVIEW_H - 23);
+            if (!drawn) {
+                ctx.drawText(tr, "Brak podglądu (np. brak", x2 + 8, y2 + 24, Ui.muted(), false);
+                ctx.drawText(tr, "założonego pancerza).", x2 + 8, y2 + 35, Ui.muted(), false);
+            }
+        }
+
+        fieldRow.shown = false;
+        for (int i = 0; i < rows.size(); i++) {
+            rows.get(i).render(ctx, tr, rowX[i], rowY[i], rowW[i], rowLw, mx, my);
+        }
         if (fieldRow.shown) {
-            field.visible = true;
             field.setX(fieldRow.x);
             field.setY(fieldRow.y + 3);
             field.setWidth(fieldRow.w);
-        } else {
-            field.visible = false;
+            return true;
         }
-        super.render(ctx, vmx, vmy, delta);
-
-        m.pop();
+        return false;
     }
 
     /** Napis BOG CODE w stylu graffiti: gruby, równy, z obrysem, cieniem i zaciekami farby. */
@@ -213,21 +403,17 @@ public class HudConfigScreen extends Screen {
         m.scale(2.5f, 2.5f, 1f);
         m.translate(-total / 2f, 0f, 0f);
 
-        // cień
         drawPair(ctx, tr, bog, code, xCode, 1, 2, 0x99000000, 0x99000000);
-        // gruby czarny obrys
         int[][] o = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
         for (int[] d : o) {
             drawPair(ctx, tr, bog, code, xCode, d[0], d[1], 0xFF000000, 0xFF000000);
         }
 
-        // zacieki farby
         int[][] dripsBog = {{2, 3}, {9, 4}, {wBog - 4, 2}};
         for (int[] d : dripsBog) drip(ctx, d[0], d[1], yellow);
         int[][] dripsCode = {{1, 4}, {8, 2}, {15, 4}, {wCode - 4, 3}};
         for (int[] d : dripsCode) drip(ctx, xCode + d[0], d[1], red);
 
-        // właściwy napis: BOG żółty, CODE czerwony
         drawPair(ctx, tr, bog, code, xCode, 0, 0, yellow, red);
 
         m.pop();
@@ -245,75 +431,58 @@ public class HudConfigScreen extends Screen {
         ctx.fill(x, top + len + 1, x + 1, top + len + 2, color);
     }
 
-    private void renderWindow(DrawContext ctx, Window w, int mx, int my) {
-        TextRenderer tr = this.textRenderer;
-        int x = w.x, y = w.y, h = w.height();
-
-        ctx.fill(x - 1, y - 1, x + WIN_W + 1, y + h + 1, Ui.border());
-        ctx.fill(x, y, x + WIN_W, y + h, Ui.bg());
-        ctx.fill(x, y, x + WIN_W, y + TITLE_H, Ui.titleBg());
-        ctx.fill(x, y + TITLE_H - 1, x + WIN_W, y + TITLE_H, Ui.accent());
-        ctx.drawText(tr, w.title, x + 6, y + 4, Ui.accent(), false);
-        ctx.drawText(tr, w.collapsed() ? "+" : "-", x + WIN_W - 10, y + 4, Ui.text(), false);
-        if (w.collapsed()) return;
-
-        int lw = w.labelW(tr);
-        int ry = y + TITLE_H + 2;
-        for (Row r : w.rows) {
-            r.render(ctx, tr, x + PAD, ry, WIN_W - 2 * PAD, lw, mx, my);
-            ry += r.h;
-        }
-    }
-
-    // ------------------------------------------------------------------ mysz
-
-    private Window windowAt(double mx, double my) {
-        for (Window w : windows) {
-            if (w.contains(mx, my)) return w;
-        }
-        return null;
-    }
-
-    private void clickRows(Window w, double mx, double my) {
-        int lw = w.labelW(this.textRenderer);
-        int ry = w.y + TITLE_H + 2;
-        for (Row r : w.rows) {
-            if (my >= ry && my < ry + r.h) {
-                activeWin = w;
-                activeRow = r;
-                r.click(mx, my, w.x + PAD, WIN_W - 2 * PAD, lw);
-                return;
-            }
-            ry += r.h;
-        }
-    }
+    // ------------------------------------------------------------------ mysz i klawiatura
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         double vx = mx / s(), vy = my / s();
-        if (field.visible && field.isMouseOver(vx, vy)) {
+        if (selected >= 0 && field.visible && field.isMouseOver(vx, vy)) {
             return super.mouseClicked(vx, vy, button);
         }
         field.setFocused(false);
 
-        Window win = windowAt(vx, vy);
-        if (win != null) {
-            if (vy < win.y + TITLE_H) {
-                c().winCollapsed[win.idx] = !c().winCollapsed[win.idx];
-                layoutWindows();
-                return true;
+        if (button != 0) return super.mouseClicked(vx, vy, button);
+
+        if (selected < 0) {
+            for (int i = 0; i < MODULES; i++) {
+                int x = cardX(i), y = cardY(i);
+                if (vx >= x && vx < x + cardW && vy >= y && vy < y + CARD_H) {
+                    boolean onToggle = hasToggle(i) && vx >= x + cardW - 34 && vy >= y + CARD_H - 18;
+                    if (onToggle) toggleModule(i);
+                    else openModule(i);
+                    return true;
+                }
             }
-            if (button == 0 && !win.collapsed()) clickRows(win, vx, vy);
             return true;
         }
-        return super.mouseClicked(vx, vy, button);
+
+        // widok ustawień
+        TextRenderer tr = this.textRenderer;
+        int bw = tr.getWidth("< WRÓĆ");
+        if (vx >= px + 14 && vx < px + 14 + bw && vy >= py + 8 && vy < py + 22) {
+            selected = -1;
+            rows.clear();
+            activeRow = null;
+            return true;
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            Row r = rows.get(i);
+            if (vx >= rowX[i] && vx < rowX[i] + rowW[i] && vy >= rowY[i] && vy < rowY[i] + r.h) {
+                activeRow = r;
+                activeX = rowX[i];
+                activeW = rowW[i];
+                r.click(vx, vy, rowX[i], rowW[i], rowLw);
+                return true;
+            }
+        }
+        return true;
     }
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
         double vx = mx / s(), vy = my / s();
-        if (button == 0 && activeRow != null && activeWin != null) {
-            activeRow.drag(vx, vy, activeWin.x + PAD, WIN_W - 2 * PAD, activeWin.labelW(this.textRenderer));
+        if (button == 0 && activeRow != null) {
+            activeRow.drag(vx, vy, activeX, activeW, rowLw);
             return true;
         }
         return super.mouseDragged(vx, vy, button, dx / s(), dy / s());
@@ -321,9 +490,20 @@ public class HudConfigScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
-        activeWin = null;
         activeRow = null;
         return super.mouseReleased(mx / s(), my / s(), button);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // ESC: z ustawień modułu wraca do listy, z listy zamyka ekran
+        if (keyCode == 256 && selected >= 0 && !field.isFocused()) {
+            selected = -1;
+            rows.clear();
+            activeRow = null;
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
@@ -334,41 +514,6 @@ public class HudConfigScreen extends Screen {
     @Override
     public void close() {
         if (this.client != null) this.client.setScreen(parent);
-    }
-
-    // ------------------------------------------------------------------ okno
-
-    private class Window {
-        final int idx;
-        final String title;
-        final List<Row> rows = new ArrayList<>();
-        int x, y;
-
-        Window(int idx, String title) {
-            this.idx = idx;
-            this.title = title;
-        }
-
-        boolean collapsed() {
-            return c().winCollapsed[idx];
-        }
-
-        int height() {
-            if (collapsed()) return TITLE_H;
-            int h = TITLE_H + 4;
-            for (Row r : rows) h += r.h;
-            return h;
-        }
-
-        int labelW(TextRenderer tr) {
-            int m = 0;
-            for (Row r : rows) m = Math.max(m, r.labelWidth(tr));
-            return m;
-        }
-
-        boolean contains(double mx, double my) {
-            return mx >= x && mx < x + WIN_W && my >= y && my < y + height();
-        }
     }
 
     // ------------------------------------------------------------------ wiersze
@@ -566,6 +711,42 @@ public class HudConfigScreen extends Screen {
             if (rel < 0) return;
             int i = (int) (rel / 16);
             if (i < colors.length && rel - i * 16 < 12) set.accept(colors[i]);
+        }
+    }
+
+    /** Gotowe motywy: tło + akcent jednym kliknięciem. */
+    private static class ThemeRow extends Row {
+        /** {akcent, tło} */
+        static final int[][] T = {
+                {0xFF4D6D, 0x07182E}, {0x5CE1E6, 0x141A22}, {0xB388FF, 0x120E24},
+                {0x66E08A, 0x0B1A14}, {0xFFE135, 0x14120A}
+        };
+        private final IntConsumer pick;
+
+        ThemeRow(IntConsumer pick) {
+            super(20);
+            this.pick = pick;
+        }
+
+        @Override
+        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
+            for (int i = 0; i < T.length; i++) {
+                int bx = x + 2 + i * 24;
+                ctx.fill(bx, y + 3, bx + 20, y + 17, 0xFF000000 | T[i][1]);
+                ctx.fill(bx + 4, y + 8, bx + 16, y + 12, 0xFF000000 | T[i][0]);
+                Ui.outline(ctx, bx, y + 3, 20, 14, 0xFF000000 | T[i][0]);
+                if (mx >= bx && mx < bx + 20 && my >= y + 3 && my < y + 17) {
+                    Ui.outline(ctx, bx - 1, y + 2, 22, 16, Ui.text());
+                }
+            }
+        }
+
+        @Override
+        void click(double mx, double my, int x, int w, int lw) {
+            double rel = mx - (x + 2);
+            if (rel < 0) return;
+            int i = (int) (rel / 24);
+            if (i < T.length && rel - i * 24 < 20) pick.accept(i);
         }
     }
 

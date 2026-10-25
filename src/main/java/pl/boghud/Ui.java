@@ -68,4 +68,33 @@ public final class Ui {
         ctx.fill(x, y, x + 1, y + h, color);
         ctx.fill(x + w - 1, y, x + w, y + h, color);
     }
+
+    // --- kolory kart i panelu (styl "TWOJE MODUŁY") ---
+
+    public static int panelTop() {
+        return (c().guiAlpha << 24) | mix(c().guiBackground, c().guiAccent, 0.14);
+    }
+
+    public static int cardBg() {
+        return 0xFF000000 | mix(c().guiBackground, 0x000000, 0.3);
+    }
+
+    public static int cardBorder() {
+        return 0xFF000000 | mix(c().guiBackground, c().guiAccent, 0.28);
+    }
+
+    public static int cardHover() {
+        return 0xFF000000 | mix(c().guiBackground, c().guiAccent, 0.7);
+    }
+
+    public static int chipBg() {
+        return 0xFF000000 | mix(mix(c().guiBackground, 0x000000, 0.3), c().guiAccent, 0.22);
+    }
+
+    /** Prostokąt z lekko zaokrąglonymi rogami (używaj kolorów nieprzezroczystych). */
+    public static void roundRect(DrawContext ctx, int x, int y, int w, int h, int color) {
+        ctx.fill(x + 2, y, x + w - 2, y + h, color);
+        ctx.fill(x + 1, y + 1, x + w - 1, y + h - 1, color);
+        ctx.fill(x, y + 2, x + w, y + h - 2, color);
+    }
 }
