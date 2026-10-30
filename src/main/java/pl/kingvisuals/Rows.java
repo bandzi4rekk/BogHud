@@ -162,6 +162,30 @@ public final class Rows {
         }
     }
 
+    public static class ButtonRow extends Row {
+        private final String label;
+        private final Runnable action;
+
+        ButtonRow(String label, Runnable action) {
+            super(20);
+            this.label = label;
+            this.action = action;
+        }
+
+        @Override
+        void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int lw, int mx, int my) {
+            boolean hover = mx >= x && mx < x + w && my >= y + 2 && my < y + h;
+            Ui.roundRect(ctx, x, y + 2, w, h - 3, 6, hover ? 0x66B07CFF : 0x33A08CFF);
+            Ui.roundOutline(ctx, x, y + 2, w, h - 3, 6, 0x44FFFFFF);
+            ctx.drawText(tr, label, x + (w - tr.getWidth(label)) / 2, y + 7, Ui.TEXT, false);
+        }
+
+        @Override
+        void click(double mx, double my, int x, int w, int lw) {
+            action.run();
+        }
+    }
+
     /** Rząd przycisków wyboru jednej wartości (np. rodzaj cząsteczek). */
     public static class ChoiceRow extends Row {
         private final int[] values;

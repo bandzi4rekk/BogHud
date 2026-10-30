@@ -6,46 +6,39 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.util.math.MatrixStack;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/** Napis w prawym górnym rogu: KingVisuals (fioletowy gradient), FPS i ping. */
+/** Trzy niezależne elementy HUD: Watermark (KingVisuals), FPS i Ping - każdy z własną pozycją i skalą. */
 public final class Overlay {
-    /** Gdy true, overlay rysuje edytor HUD, a nie zwykły callback. */
+    public static final int COUNT = 3;
+    public static final String[] NAMES = {"Watermark", "FPS", "Ping"};
+
+    /** Gdy true, elementy rysuje edytor HUD, a nie zwykły callback. */
     public static boolean editorOpen = false;
 
     private Overlay() {}
 
-    private static List<String[]> lines(MinecraftClient mc, KvConfig c) {
-        List<String[]> l = new ArrayList<>();
-        if (c.overlay.watermark) l.add(new String[]{"mark", "KingVisuals"});
-        if (c.overlay.fps) l.add(new String[]{"FPS:", String.valueOf(mc.getCurrentFps())});
-        if (c.overlay.ping) {
-            int ping = 0;
-            if (mc.player != null && mc.getNetworkHandler() != null) {
-                PlayerListEntry e = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid());
-                if (e != null) ping = e.getLatency();
-            }
-            l.add(new String[]{"Ping:", ping + " ms"});
+    /** {etykieta, wartość}; dla watermarku etykieta to "mark". */
+    private static String[] text(MinecraftClient mc, int i) {
+        if (i == 0) return new String[]{"mark", "KingVisuals"};
+        if (i == 1) return new String[]{"FPS:", String.valueOf(mc.getCurrentFps())};
+        int ping = 0;
+        if (mc.player != null && mc.getNetworkHandler() != null) {
+            PlayerListEntry e = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid());
+            if (e != null) ping = e.getLatency();
         }
-        return l;
+        return new String[]{"Ping:", ping + " ms"};
     }
 
-    private static int lineWidth(TextRenderer tr, String[] l) {
-        if (l[0].equals("mark")) return Ui.gradWidth(tr, l[1]);
-        return tr.getWidth(l[0] + " " + l[1]);
+    private static int width(TextRenderer tr, String[] t) {
+        if (t[0].equals("mark")) return Ui.gradWidth(tr, t[1]);
+        return tr.getWidth(t[0] + " " + t[1]);
     }
 
-    /** Rozmiar overlayu w pikselach ekranu (ze skalą) albo null, gdy nic nie jest włączone. */
-    public static int[] size() {
+    /** Rozmiar elementu w pikselach ekranu (ze skalą). */
+    public static int[] size(int i) {
         KvConfig c = KvMod.CONFIG;
         MinecraftClient mc = MinecraftClient.getInstance();
-        List<String[]> ls = lines(mc, c);
-        if (ls.isEmpty()) return null;
-        int w = 0;
-        for (String[] l : ls) w = Math.max(w, lineWidth(mc.textRenderer, l));
-        float s = Math.max(0.5f, c.overlay.scalePercent / 100f);
-        return new int[]{Math.round(w * s), Math.round(ls.size() * 10 * s)};
+        float s = Math.max(0.5f, c.item(i).scalePercent / 100f);
+        return new int[]{Math.round(width(mc.textRenderer, text(mc, i)) * s), Math.round(9 * s)};
     }
 
     public static void render(DrawContext ctx) {
@@ -53,40 +46,33 @@ public final class Overlay {
         KvConfig c = KvMod.CONFIG;
         MinecraftClient mc = MinecraftClient.getInstance();
         if (c == null || mc.player == null || mc.options.hudHidden) return;
-        int[] sz = size();
-        if (sz == null) return;
-        int rightX = mc.getWindow().getScaledWidth() - c.overlay.offX;
-        draw(ctx, rightX - sz[0], c.overlay.offY);
+        int sw = mc.getWindow().getScaledWidth();
+        for (int i = 0; i < COUNT; i++) {
+            KvConfig.HudItem it = c.item(i);
+            if (!it.enabled) continue;
+            int[] sz = size(i);
+            draw(ctx, i, sw - it.offX - sz[0], it.offY);
+        }
     }
 
-    /** Rysuje overlay z lewym górnym rogiem w (x, y). */
-    public static void draw(DrawContext ctx, int x, int y) {
+    /** Rysuje element z lewym górnym rogiem w (x, y). */
+    public static void draw(DrawContext ctx, int i, int x, int y) {
         KvConfig c = KvMod.CONFIG;
         MinecraftClient mc = MinecraftClient.getInstance();
         TextRenderer tr = mc.textRenderer;
-        List<String[]> ls = lines(mc, c);
-        if (ls.isEmpty()) return;
-
-        int w = 0;
-        for (String[] l : ls) w = Math.max(w, lineWidth(tr, l));
-        float s = Math.max(0.5f, c.overlay.scalePercent / 100f);
+        String[] t = text(mc, i);
+        float s = Math.max(0.5f, c.item(i).scalePercent / 100f);
 
         MatrixStack m = ctx.getMatrices();
         m.push();
         m.scale(s, s, 1f);
         int bx = Math.round(x / s);
         int by = Math.round(y / s);
-        int cy = by;
-        for (String[] l : ls) {
-            int lw = lineWidth(tr, l);
-            int lx = bx + (w - lw); // wyrównanie do prawej
-            if (l[0].equals("mark")) {
-                Ui.gradText(ctx, tr, l[1], lx, cy, Ui.PURPLE, Ui.BLUE, true);
-            } else {
-                ctx.drawText(tr, l[0], lx, cy, Ui.LABEL, true);
-                ctx.drawText(tr, l[1], lx + tr.getWidth(l[0] + " "), cy, 0xFFFFFFFF, true);
-            }
-            cy += 10;
+        if (t[0].equals("mark")) {
+            Ui.gradText(ctx, tr, t[1], bx, by, Ui.PURPLE, Ui.BLUE, true);
+        } else {
+            ctx.drawText(tr, t[0], bx, by, Ui.LABEL, true);
+            ctx.drawText(tr, t[1], bx + tr.getWidth(t[0] + " "), by, 0xFFFFFFFF, true);
         }
         m.pop();
     }

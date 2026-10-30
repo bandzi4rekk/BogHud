@@ -22,6 +22,18 @@ public final class Draw3D {
         v(vc, m, x1, y1, z1, r, g, b, a);
     }
 
+    /** Prostopadłościan o podanych granicach (6 ścian). */
+    public static void box(VertexConsumer vc, Matrix4f m,
+                           double x0, double y0, double z0, double x1, double y1, double z1,
+                           int r, int g, int b, int a) {
+        quad(vc, m, x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, r, g, b, a);
+        quad(vc, m, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, r, g, b, a);
+        quad(vc, m, x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, r, g, b, a);
+        quad(vc, m, x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0, r, g, b, a);
+        quad(vc, m, x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, r, g, b, a);
+        quad(vc, m, x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, r, g, b, a);
+    }
+
     private static void v(VertexConsumer vc, Matrix4f m, double x, double y, double z, int r, int g, int b, int a) {
         vc.vertex(m, (float) x, (float) y, (float) z).color(r, g, b, a);
     }

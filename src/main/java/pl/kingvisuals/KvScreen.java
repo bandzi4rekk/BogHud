@@ -108,15 +108,18 @@ public class KvScreen extends Screen {
     private void buildModules() {
         modules.clear();
 
-        // zakładka HUD
-        modules.add(new Module(0, "Watermark", () -> "Napis KingVisuals w prawym górnym rogu",
-                () -> c().overlay.watermark, v -> c().overlay.watermark = v, this::buildOverlay));
+        // zakładka HUD: każdy element osobno
+        modules.add(new Module(0, "Watermark", () -> "Napis KingVisuals w rogu ekranu",
+                () -> c().watermark.enabled, v -> c().watermark.enabled = v, () -> buildHudItem(0)));
         modules.add(new Module(0, "FPS", () -> "Pokazuje klatki na sekundę",
-                () -> c().overlay.fps, v -> c().overlay.fps = v, this::buildOverlay));
+                () -> c().fps.enabled, v -> c().fps.enabled = v, () -> buildHudItem(1)));
         modules.add(new Module(0, "Ping", () -> "Pokazuje opóźnienie do serwera",
-                () -> c().overlay.ping, v -> c().overlay.ping = v, this::buildOverlay));
+                () -> c().ping.enabled, v -> c().ping.enabled = v, () -> buildHudItem(2)));
 
         // zakładka Visuals
+        modules.add(new Module(1, "Target ESP",
+                () -> "Tryb: " + EspShapes.MODES[Math.max(0, Math.min(7, c().esp.mode))] + ", zasięg: " + c().esp.range + " m",
+                () -> c().esp.enabled, v -> c().esp.enabled = v, this::buildEsp));
         modules.add(new Module(1, "Jump Circles",
                 () -> "Promień: " + c().jump.radiusPercent + "%, czas: " + c().jump.durationMs + " ms",
                 () -> c().jump.enabled, v -> c().jump.enabled = v, this::buildJump));
@@ -150,13 +153,38 @@ public class KvScreen extends Screen {
 
     // ------------------------------------------------------------------ ustawienia modułów
 
-    private void buildOverlay() {
-        rows.add(new ToggleRow("Watermark", () -> c().overlay.watermark, v -> c().overlay.watermark = v));
-        rows.add(new ToggleRow("FPS", () -> c().overlay.fps, v -> c().overlay.fps = v));
-        rows.add(new ToggleRow("Ping", () -> c().overlay.ping, v -> c().overlay.ping = v));
-        rows.add(new SliderRow("Skala %", 50, 200, () -> c().overlay.scalePercent, v -> c().overlay.scalePercent = v, 0));
-        rows.add(new TextRow("Pozycję zmienisz przyciskiem"));
-        rows.add(new TextRow("Edytuj HUD (prawy górny róg)."));
+    private void buildHudItem(int idx) {
+        rows.add(new ToggleRow("Włączony", () -> c().item(idx).enabled, v -> c().item(idx).enabled = v));
+        rows.add(new SliderRow("Skala %", 50, 200, () -> c().item(idx).scalePercent, v -> c().item(idx).scalePercent = v, 0));
+        rows.add(new TextRow("Pozycję tego elementu ustawisz"));
+        rows.add(new TextRow("osobno w Edytuj HUD (prawy"));
+        rows.add(new TextRow("górny róg menu)."));
+    }
+
+    private void buildEsp() {
+        rows.add(new ToggleRow("Włączony", () -> c().esp.enabled, v -> c().esp.enabled = v));
+        rows.add(new HeadingRow("Tryb", null));
+        rows.add(new ChoiceRow(new int[]{0, 1, 2, 3}, new String[]{"Ghosts", "Circle", "Marker", "Spiral"},
+                () -> c().esp.mode, v -> c().esp.mode = v));
+        rows.add(new ChoiceRow(new int[]{4, 5, 6, 7}, new String[]{"Corners", "Chevrons", "Spinner", "Scifi"},
+                () -> c().esp.mode, v -> c().esp.mode = v));
+        rows.add(new SliderRow("Szybkość %", 10, 300, () -> c().esp.speedPercent, v -> c().esp.speedPercent = v, 0));
+        rows.add(new SliderRow("Rozmiar %", 30, 200, () -> c().esp.sizePercent, v -> c().esp.sizePercent = v, 0));
+        rows.add(new SliderRow("Glow %", 0, 100, () -> c().esp.glowPercent, v -> c().esp.glowPercent = v, 0));
+        rows.add(new SliderRow("Zasięg (m)", 8, 128, () -> c().esp.range, v -> c().esp.range = v, 0));
+        rows.add(new ToggleRow("Hurt Flash", () -> c().esp.hurtFlash, v -> c().esp.hurtFlash = v));
+        rows.add(new ToggleRow("Tylko gdy patrzysz", () -> c().esp.showOnLook, v -> c().esp.showOnLook = v));
+        rows.add(new HeadingRow("Kolor", () -> c().esp.color));
+        rows.add(new ChoiceRow(new int[]{1, 0}, new String[]{"Motyw", "Własny"},
+                () -> c().esp.themeColor ? 1 : 0, v -> c().esp.themeColor = v == 1));
+        rows.add(new PresetRow(PRESETS, v -> {
+            c().esp.color = v;
+            c().esp.themeColor = false;
+        }));
+        addChannels(() -> c().esp.color, v -> {
+            c().esp.color = v;
+            c().esp.themeColor = false;
+        });
     }
 
     private void buildJump() {
@@ -262,7 +290,7 @@ public class KvScreen extends Screen {
         for (Row r : rows) lw = Math.max(lw, r.labelWidth(tr));
         rowLw = lw;
 
-        boolean two = pw >= 420;
+        boolean two = true;
         int colW = two ? (pw - 28 - 14) / 2 : pw - 28;
         int top = py + 58;
         int bottom = py + ph - 26;
@@ -308,7 +336,7 @@ public class KvScreen extends Screen {
         ctx.drawText(tr, "King", 0, 0, 0xFFFFFFFF, false);
         int wV = Ui.gradText(ctx, tr, "Visuals", wK, 0, Ui.PURPLE, Ui.BLUE, false);
         m.pop();
-        ctx.drawText(tr, "v0.1.0", px + 16 + Math.round((wK + wV) * 1.6f) + 6, py + 15, Ui.MUTED, false);
+        ctx.drawText(tr, "v0.2.0", px + 16 + Math.round((wK + wV) * 1.6f) + 6, py + 15, Ui.MUTED, false);
 
         // przycisk Edytuj HUD
         boolean eh = hit(mx, my, editX(), editY(), 76, 14);

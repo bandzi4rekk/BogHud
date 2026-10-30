@@ -14,15 +14,19 @@ public class KvConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("kingvisuals.json");
 
-    /** Napis w rogu ekranu: KingVisuals + FPS + ping (każdy do włączenia osobno). */
-    public static class Overlay {
-        public boolean watermark = true;
-        public boolean fps = true;
-        public boolean ping = true;
-        /** Odległość od prawej krawędzi i od góry ekranu. */
+    /** Jeden element HUD (Watermark, FPS albo Ping) z własną pozycją i skalą. */
+    public static class HudItem {
+        public boolean enabled = true;
+        /** Odległość od prawej krawędzi i od góry ekranu (element jest wyrównany do prawej). */
         public int offX = 4;
         public int offY = 4;
         public int scalePercent = 100;
+
+        HudItem() {}
+
+        HudItem(int offY) {
+            this.offY = offY;
+        }
     }
 
     /** Kółko rozchodzące się przy skoku. */
@@ -59,18 +63,54 @@ public class KvConfig {
         public boolean reactToTarget = true;
     }
 
-    public Overlay overlay = new Overlay();
+    /**
+     * Target ESP: efekt wokół celu. Tryby: 0 Ghosts, 1 Circle, 2 Marker, 3 Spiral,
+     * 4 Corners, 5 Chevrons, 6 Spinner, 7 Scifi.
+     */
+    public static class TargetEsp {
+        public boolean enabled = true;
+        public int mode = 4;
+        public int speedPercent = 100;
+        public int sizePercent = 85;
+        public int glowPercent = 70;
+        public boolean themeColor = true;
+        public int color = 0x8A4DFF;
+        public boolean hurtFlash = true;
+        public boolean showOnLook = true;
+        public int range = 96;
+    }
+
+    public HudItem watermark = new HudItem(4);
+    public HudItem fps = new HudItem(14);
+    public HudItem ping = new HudItem(24);
     public JumpCircles jump = new JumpCircles();
     public ChinaHat hat = new ChinaHat();
     public HitParticles hit = new HitParticles();
     public Crosshair cross = new Crosshair();
+    public TargetEsp esp = new TargetEsp();
+
+    public HudItem item(int i) {
+        return i == 0 ? watermark : (i == 1 ? fps : ping);
+    }
+
+    public void resetHud() {
+        watermark.offX = 4;
+        watermark.offY = 4;
+        fps.offX = 4;
+        fps.offY = 14;
+        ping.offX = 4;
+        ping.offY = 24;
+    }
 
     public void fixup() {
-        if (overlay == null) overlay = new Overlay();
+        if (watermark == null) watermark = new HudItem(4);
+        if (fps == null) fps = new HudItem(14);
+        if (ping == null) ping = new HudItem(24);
         if (jump == null) jump = new JumpCircles();
         if (hat == null) hat = new ChinaHat();
         if (hit == null) hit = new HitParticles();
         if (cross == null) cross = new Crosshair();
+        if (esp == null) esp = new TargetEsp();
     }
 
     public static KvConfig load() {

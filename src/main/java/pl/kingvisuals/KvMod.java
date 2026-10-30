@@ -37,7 +37,9 @@ public class KvMod implements ClientModInitializer {
             if (CONFIG != null) CrosshairFx.render(ctx, mc, CONFIG);
         });
 
+        Target.init();
         Visuals3D.init();
+        TargetEsp.init();
         HitFx.init();
     }
 }
